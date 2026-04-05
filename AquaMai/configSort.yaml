@@ -15,6 +15,7 @@
   - GameSystem.AdxHidInput
   - GameSystem.MaimollerIO
   - GameSystem.PdxTouch
+  - GameSystem.TenoDXIO
   - Tweaks.ResetTouch
   - UX.CustomFnToKeyboard
 
@@ -174,4 +175,3 @@
   - Fancy.TrackCamouflage
   - Fancy.ResourcesOverride
   - GameSystem.OldCabLightBoardSupport
-
