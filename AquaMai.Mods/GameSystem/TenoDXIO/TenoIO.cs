@@ -6,7 +6,6 @@ using AquaMai.Core.Helpers;
 using AquaMai.Config.Attributes;
 using Manager;
 using MelonLoader;
-using UnityEngine;
 
 namespace AquaMai.Mods.GameSystem
 {
@@ -41,17 +40,19 @@ namespace AquaMai.Mods.GameSystem
         [ConfigEntry("单独区块灵敏度覆盖", "格式如 A7:80,B2:40。用英文或中文逗号分隔")]
         public static string CustomThresholdOverrides = "";
 
-        [ConfigEntry("BCDE区方差突变触发阈值", "默认200。方差(Variance)大于此值即使未过绝对灵敏度线也会触发")]
+        [ConfigEntry("BCDE区方差突变触发阈值", "默认500")]
         public static int VarianceThresholdBCDE = 500;
+        [ConfigEntry("BCDE区方差突变触发阈值", "")]
+        public static int VarianceThresholdBCDEDown = 300;
 
-        [ConfigEntry("B区方varThresh阈值", "默认200。方差(Variance)大于此值即使未过绝对灵敏度线也会触发")]
-        public static int varThreshB = 1200;
-        [ConfigEntry("C区方varThresh阈值", "默认200。方差(Variance)大于此值即使未过绝对灵敏度线也会触发")]
-        public static int varThreshC = 1000;
-        [ConfigEntry("D区方varThresh阈值", "默认200。方差(Variance)大于此值即使未过绝对灵敏度线也会触发")]
-        public static int varThreshD = 1500;
-        [ConfigEntry("E区方varThresh阈值", "默认200。方差(Variance)大于此值即使未过绝对灵敏度线也会触发")]
-        public static int varThreshE = 1000;
+        [ConfigEntry("B区方varThresh阈值", "默认800。")]
+        public static int VarThreshB = 800;
+        [ConfigEntry("C区方varThresh阈值", "默认800。")]
+        public static int VarThreshC = 800;
+        [ConfigEntry("D区方varThresh阈值", "默认800。")]
+        public static int VarThreshD = 800;
+        [ConfigEntry("E区方varThresh阈值", "默认800。")]
+        public static int VarThreshE = 800;
 
         // ===== 本次新增：A区方差突变补偿 =====
         [ConfigEntry("A区默认方差突变阈值", "默认2000。快速扫过A区时，若方差(Variance)大于此值也会提前触发")]
@@ -72,18 +73,22 @@ namespace AquaMai.Mods.GameSystem
         public static int AreaAPressBreakThreshold = 800;
 
         [ConfigEntry("A区瞬发限制", "默认10(130ms), 在瞬发之后10帧数据内不会被再次激活 设为-1禁用。 \n 用于扫圈时不小心用手指扫过或者扫过边缘")]
-        public static int AreaAFastSildeFpslimit = -1;
+        public static int AreaAFastSlideFpsLimit = 10;
+
+        [ConfigEntry("A区未触发时的固定基线变化检测，上升", "")]
+        public static double reaADonwTrUP = 0.6;
+        [ConfigEntry("A区未触发时的固定基线变化检测，下降", "")]
+        public static double reaADonwTrDown = 0.1;
         // ===============================================
 
         [ConfigEntry("物理通道映射顺序", "从硬件通道0到33对应的逻辑按键名称，用逗号分隔")]
         public static string TouchSheetMapping = "A7,C2,E7,D7,B6,A6,E6,D6,B5,A5,E5,D5,B4,A4,E4,D4,B3,A3,C1,E3,D3,B2,A2,E2,D2,B1,A1,E1,D1,B8,A8,E8,D8,B7";
 
         [ConfigEntry("Logger", "输出数据")]
-        public static byte LoggerTouch = 0;
+        public static int LoggerTouch = 0;
         // ===============================================
 
         private static bool isRunning = false;
-        private static Dictionary<string, int> SENSOR_VARIANCE_THRESHOLDS = new Dictionary<string, int>();
         private static Thread serialThread;
         private static SerialPort serialPort;
         private static ulong currentTouchMask = 0;
@@ -92,16 +97,20 @@ namespace AquaMai.Mods.GameSystem
         private static readonly object configLock = new object();
 
         private static readonly string[] SENSOR_ORDER = {
-      "A1", "A2", "A3", "A4", "A5", "A6", "A7", "A8",
-      "B1", "B2", "B3", "B4", "B5", "B6", "B7", "B8",
-      "C1", "C2",
-      "D1", "D2", "D3", "D4", "D5", "D6", "D7", "D8",
-      "E1", "E2", "E3", "E4", "E5", "E6", "E7", "E8"
-    };
+            "A1", "A2", "A3", "A4", "A5", "A6", "A7", "A8",
+            "B1", "B2", "B3", "B4", "B5", "B6", "B7", "B8",
+            "C1", "C2",
+            "D1", "D2", "D3", "D4", "D5", "D6", "D7", "D8",
+            "E1", "E2", "E3", "E4", "E5", "E6", "E7", "E8"
+        };
 
         private static Dictionary<string, int> LOGICAL_TO_CHANNEL = new Dictionary<string, int>();
         private static Dictionary<string, int> SENSOR_THRESHOLDS = new Dictionary<string, int>();
+        private static Dictionary<string, int> SENSOR_VARIANCE_THRESHOLDS = new Dictionary<string, int>();
         private static Dictionary<string, CapsenseState> allTrackers = new Dictionary<string, CapsenseState>();
+
+        // 性能优化：提前计算好每个硬件通道对应的 TouchPanelArea Mask
+        private static ulong[] CHANNEL_TO_MASK = new ulong[34];
 
         // 启动校验相关
         private static int[] startupRawBuffer = new int[34];
@@ -109,7 +118,7 @@ namespace AquaMai.Mods.GameSystem
         private static int startupPacketsCount = 0;
         public static bool startupRawReady = false;
 
-        // 热重载状态追踪变量 (增加 _varADefault 和 _varAOverrides)
+        // 热重载状态追踪变量
         private static string _port = "";
         private static int _baud = 0;
         private static string _map = "";
@@ -149,21 +158,18 @@ namespace AquaMai.Mods.GameSystem
                 _map != TouchSheetMapping ||
                 _overrides != CustomThresholdOverrides ||
                 _thA != ThresholdA || _thB != ThresholdB || _thC != ThresholdC || _thD != ThresholdD || _thE != ThresholdE ||
-                _varADefault != VarianceThresholdADefault ||     // 新增
-                _varAOverrides != CustomVarianceOverridesA       // 新增
+                _varADefault != VarianceThresholdADefault ||
+                _varAOverrides != CustomVarianceOverridesA
             );
 
             if (requireSerialRestart)
             {
-                if (requireSerialRestart)
+                _port = COMPort;
+                _baud = BaudRate;
+                if (serialPort != null)
                 {
-                    _port = COMPort;
-                    _baud = BaudRate;
-                    if (serialPort != null)
-                    {
-                        MelonLogger.Msg("[TenoDXIO] 检测到串口号/波特率变更，正在重启硬件连接...");
-                        CloseSerial();
-                    }
+                    MelonLogger.Msg("[TenoDXIO] 检测到串口号/波特率变更，正在重启硬件连接...");
+                    CloseSerial();
                 }
             }
 
@@ -172,18 +178,26 @@ namespace AquaMai.Mods.GameSystem
                 _map = TouchSheetMapping;
                 _overrides = CustomThresholdOverrides;
                 _thA = ThresholdA; _thB = ThresholdB; _thC = ThresholdC; _thD = ThresholdD; _thE = ThresholdE;
-                _varADefault = VarianceThresholdADefault;        // 新增
-                _varAOverrides = CustomVarianceOverridesA;       // 新增
+                _varADefault = VarianceThresholdADefault;
+                _varAOverrides = CustomVarianceOverridesA;
 
                 lock (configLock)
                 {
                     LOGICAL_TO_CHANNEL.Clear();
-                    SENSOR_VARIANCE_THRESHOLDS.Clear();          // 每次重载清空字典
+                    SENSOR_VARIANCE_THRESHOLDS.Clear();
+                    Array.Clear(CHANNEL_TO_MASK, 0, CHANNEL_TO_MASK.Length);
 
                     var sheet = _map.Split(new[] { ',', '，' }, StringSplitOptions.RemoveEmptyEntries);
                     for (int i = 0; i < sheet.Length; i++)
                     {
-                        LOGICAL_TO_CHANNEL[sheet[i].Trim().ToUpper()] = i;
+                        string logicalName = sheet[i].Trim().ToUpper();
+                        LOGICAL_TO_CHANNEL[logicalName] = i;
+
+                        // 预计算 Mask 避免在 Update 中进行耗时的 Enum.TryParse
+                        if (Enum.TryParse<InputManager.TouchPanelArea>(logicalName, out var area))
+                        {
+                            CHANNEL_TO_MASK[i] = (1UL << (int)area);
+                        }
                     }
 
                     foreach (var name in SENSOR_ORDER)
@@ -192,7 +206,7 @@ namespace AquaMai.Mods.GameSystem
                         {
                             case 'A':
                                 SENSOR_THRESHOLDS[name] = _thA;
-                                SENSOR_VARIANCE_THRESHOLDS[name] = _varADefault; // 默认写入全局A区方差
+                                SENSOR_VARIANCE_THRESHOLDS[name] = _varADefault;
                                 break;
                             case 'B': SENSOR_THRESHOLDS[name] = _thB; break;
                             case 'C': SENSOR_THRESHOLDS[name] = _thC; break;
@@ -217,7 +231,7 @@ namespace AquaMai.Mods.GameSystem
                         }
                     }
 
-                    // ===== 新增：解析A区方差灵敏度覆盖 =====
+                    // 解析A区方差灵敏度覆盖
                     if (!string.IsNullOrWhiteSpace(_varAOverrides))
                     {
                         var pairs = _varAOverrides.Split(new[] { ',', '，' }, StringSplitOptions.RemoveEmptyEntries);
@@ -235,6 +249,7 @@ namespace AquaMai.Mods.GameSystem
                 MelonLogger.Msg("[TenoDXIO] 判定参数与映射表热重载完成！已立刻生效。");
             }
         }
+
         private static void CloseSerial()
         {
             if (serialPort != null)
@@ -324,10 +339,8 @@ namespace AquaMai.Mods.GameSystem
 
                                             if (status == 1)
                                             {
-                                                if (Enum.TryParse<InputManager.TouchPanelArea>(name, out var area))
-                                                {
-                                                    newTouchMask |= (1UL << (int)area);
-                                                }
+                                                // 优化：使用预计算好的位掩码，消除 Enum.TryParse 的高频 GC 消耗
+                                                newTouchMask |= CHANNEL_TO_MASK[chIdx];
                                             }
                                         }
                                     }
@@ -371,20 +384,21 @@ namespace AquaMai.Mods.GameSystem
             public string logicalName;
             public char block;
             public float baseline = 0.0f;
-            public float rwadefault = 0.0f;
+            public float rawDefault = 0.0f;
 
-            public Queue<int> history = new Queue<int>();
-            public Queue<int> history2 = new Queue<int>();
-            public Queue<int> varHistory = new Queue<int>();
-            public int[] lastTouch = new int[34]; // 新增：每个通道的上一次触摸状态
-            public bool[] lastTouch2 = new bool[34]; // 新增：每个通道的上一次触摸状态
+            // 优化：将 Queue 替换为 List，并自己维护数量。以零 GC 方式模拟环形缓冲，解决 .ToArray() 导致的卡顿
+            public List<int> history = new List<int>(5);
+            public List<int> history2 = new List<int>(12);
+            public List<int> varHistory = new List<int>(12);
 
+            public int[] lastTouch = new int[34];
+            public bool[] lastTouch2 = new bool[34];
 
             public string subState = null;
             public string lastSide = null;
             public int currentStatus = 0;
-            public int rawtouched = 0;
-            public int rawtouchedlock = 0;
+            public int rawTouched = 0;
+            public int rawTouchedLock = 0;
 
             public CapsenseState(string name)
             {
@@ -395,20 +409,25 @@ namespace AquaMai.Mods.GameSystem
             public void Reset()
             {
                 baseline = 0.0f;
-                rwadefault = 0.0f;
+                rawDefault = 0.0f;
                 history.Clear();
                 history2.Clear();
+                varHistory.Clear();
                 subState = null;
                 lastSide = null;
                 currentStatus = 0;
-                rawtouched = 0;
-                rawtouchedlock = 0;
+                rawTouched = 0;
+                rawTouchedLock = 0;
             }
 
-            private void AddToQueue(Queue<int> q, int val, int maxLen)
+            // 零 GC 缓冲记录
+            private void AddToList(List<int> list, int val, int maxLen)
             {
-                q.Enqueue(val);
-                while (q.Count > maxLen) q.Dequeue();
+                list.Add(val);
+                if (list.Count > maxLen)
+                {
+                    list.RemoveAt(0);
+                }
             }
 
             private int GetBlockDefault()
@@ -442,143 +461,143 @@ namespace AquaMai.Mods.GameSystem
             {
                 if (baseline == 0) baseline = raw;
 
-                int variance = raw - (int)rwadefault;
+                int variance = raw - (int)rawDefault;
+
                 // ============ A 区判定 ============
                 if (block == 'A')
                 {
                     if (!startupRawReady) return 0;
-                    if (rwadefault == 0) rwadefault = startupRawFinal[chIdx];
+                    if (rawDefault == 0) rawDefault = startupRawFinal[chIdx];
 
-                    // 2. 获取当前区域对应的绝对阈值，以及独立的方差阈值
                     float effThreshold = EnableFixedTriggerMode ? ((threshold - 30) * 100 + GetBlockDefault()) : threshold;
 
-                    // 从字典安全读取当前键（如 A1）的独立方差阈值
                     int currentVarThreshold = SENSOR_VARIANCE_THRESHOLDS.ContainsKey(logicalName)
                                                 ? SENSOR_VARIANCE_THRESHOLDS[logicalName]
                                                 : VarianceThresholdADefault;
 
-                    // 3. 双条件触发（绝对值达标，或者方差超过该键的专属突变阈值）
                     bool isTriggered = raw > effThreshold;
                     string currentSide = isTriggered ? "above" : "below";
-
                     bool down = false;
 
-                    AddToQueue(history2, raw, 10);
-                    AddToQueue(varHistory, variance, 10);
+                    AddToList(history2, raw, 10);
+                    AddToList(varHistory, variance, 10);
 
-                    // ... 下方的逻辑保持不变，直到 A 区判定结束 ...
                     if (lastSide != null && currentSide != lastSide)
                     {
                         history.Clear();
                         subState = null;
-                        rawtouchedlock = 0;
-                        rawtouched = 0;
+                        rawTouchedLock = 0;
+                        rawTouched = 0;
                         currentStatus = (currentSide == "above") ? 1 : 0;
                     }
 
                     lastSide = currentSide;
-                    AddToQueue(history, raw, 4);
+                    AddToList(history, raw, 4);
 
                     if (history.Count >= 1)
                     {
-                        int oldest = history.Peek();
+                        // 原 history.Peek() 获取的是队列最早的元素（即索引0）
+                        int oldest = history[0];
                         int current = raw;
 
                         if (currentSide == "above")
                         {
                             down = true;
-                            if (history2.Count >= 8 && rawtouchedlock == 0)
+                            // 逻辑修正：这里删除了原代码中完全一致的重复块
+                            if (history2.Count >= 8 && rawTouchedLock == 0)
                             {
-                                int diff = current - history2.Peek();
+                                int oldestHistory2 = history2[0]; // 等同于原 history2.Peek()
+                                int diff = current - oldestHistory2;
                                 if (diff <= 500)
                                 {
-                                    rawtouched = history2.Peek();
-                                    rawtouchedlock = 1;
-                                }
-                            }
-                            if (history2.Count >= 8 && rawtouchedlock == 0)
-                            {
-                                int diff = current - history2.Peek();
-                                if (diff <= 500)
-                                {
-                                    rawtouched = history2.Peek();
-                                    rawtouchedlock = 1;
+                                    rawTouched = oldestHistory2;
+                                    rawTouchedLock = 1;
                                 }
                             }
 
                             if (subState != "raw10")
                             {
-                                // 下降释放阈值判定
-                                if ((oldest - current >= AreaAReleaseDropThreshold) && current < rawtouched - AreaAPressBreakThreshold)
+                                if ((oldest - current >= AreaAReleaseDropThreshold) && current < rawTouched - AreaAPressBreakThreshold)
                                 {
                                     currentStatus = 0;
                                     subState = "raw10";
                                     history.Clear();
-                                    AddToQueue(history, current, 4);
+                                    AddToList(history, current, 4);
                                 }
                             }
                             else
                             {
-                                // 上升按下阈值判定
                                 if (current - oldest >= AreaAPressRiseThreshold)
                                 {
                                     currentStatus = 1;
                                     subState = null;
                                     history.Clear();
-                                    AddToQueue(history, current, 4);
+                                    AddToList(history, current, 4);
                                 }
                             }
                         }
                         else
                         {
-                            //
-                            int gap = (int)(effThreshold - rwadefault);
+                            int gap = (int)(effThreshold - rawDefault);
                             if (gap <= 0) gap = 100;
-                            if (current - oldest >= gap * 0.25)
+                            if (current - oldest >= gap * reaADonwTrUP)
                             {
                                 currentStatus = 1;
                                 subState = "raw01";
                                 history.Clear();
-                                AddToQueue(history, current, 4);
+                                AddToList(history, current, 4);
                             }
-                            else if (oldest - current >= gap * 0.05)
+                            else if (oldest - current >= gap * reaADonwTrDown)
                             {
                                 currentStatus = 0;
                                 subState = null;
                                 history.Clear();
-                                AddToQueue(history, current, 4);
+                                AddToList(history, current, 4);
                             }
-                            //
 
-                            int var1 = varHistory.ToArray()[varHistory.Count - 2];
-                            if (AreaAFastSildeFpslimit == 0)
+                            // 性能优化：直接取倒数第二个元素，避免 ToArray 分配内存
+                            int var1 = varHistory.Count >= 2 ? varHistory[varHistory.Count - 2] : variance;
+                            // 1. 计算两帧变化量 (Delta)，用于捕捉突然滑动并绝对过滤抬手抖动
+                            int delta = variance - var1;
+                            // 2. 状态重置：如果方差极小，说明彻底松开手了，断开触发并清除异常锁定
+                            if (variance < 200)
                             {
-                                if (lastTouch[chIdx] < 1 && var1 > 300 && variance < 1000)
-                                {
-                                    lastTouch[chIdx] = AreaAFastSildeFpslimit;
-                                    currentStatus = 1;
-                                }
-                                else if (var1 < 200)
-                                {
-                                    currentStatus = 0;
-                                }
+                                currentStatus = 0;
+                                if (lastTouch[chIdx] < 0) lastTouch[chIdx] = 0;
+                            }
+                            // 3. 冷却与触发判定
+                            if (lastTouch[chIdx] > 0)
+                            {
+                                // 正在冷却中，数值递减，不重复触发
+                                lastTouch[chIdx]--;
                             }
                             else
                             {
-                                lastTouch[chIdx]--;
+                                // 触发条件核心逻辑：
+                                // a. 快速滑动：单帧变化率足够大 (delta > 600) 或总方差超过了配置文件中的突变阈值
+                                // b. 防抬手抖动：必须是正向增加 (delta > 0)，完美排除手指抬起时的断崖式下降
+                                // c. 防抢跑前夕：当前 raw 不能太接近固定基线（预留 1500 余量，马上要摸到固定基线的交给 fixed 处理）
+
+                                bool isFastSlide = (delta > 600 || variance > currentVarThreshold);
+                                bool isRising = (delta > 0);
+                                bool isNotPrePress = (raw < (effThreshold - 800));
+
+                                if (isFastSlide && isRising && isNotPrePress)
+                                {
+                                    currentStatus = 1; // 激活触发
+                                    // 写入 FPS 冷却时间
+                                    lastTouch[chIdx] = AreaAFastSlideFpsLimit >= 0 ? AreaAFastSlideFpsLimit : 10;
+                                }
                             }
                         }
                     }
-
 
                     if (chIdx == LoggerTouch)
                     {
                         MelonLogger.Msg($"Raw: {raw}, Baseline: {baseline:F1}, Threshold: {threshold}, Variance: {variance},  SubState: {subState}");
                     }
 
-                    baseline = rwadefault;
-                    // variance 已经在顶部计算过了，这里可以省略，或者保留为了统一：
-                    // variance = raw - (int)rwadefault; 
+                    baseline = rawDefault;
                     return currentStatus;
                 }
                 // ============ B、C、D、E 区判定 ============
@@ -587,10 +606,10 @@ namespace AquaMai.Mods.GameSystem
                     int varThresh = 0;
                     switch (block)
                     {
-                        case 'B': varThresh = varThreshB; break;
-                        case 'C': varThresh = varThreshC; break;
-                        case 'D': varThresh = varThreshD; break;
-                        case 'E': varThresh = varThreshE; break;
+                        case 'B': varThresh = VarThreshB; break;
+                        case 'C': varThresh = VarThreshC; break;
+                        case 'D': varThresh = VarThreshD; break;
+                        case 'E': varThresh = VarThreshE; break;
                     }
 
                     if (baseline + varThresh > raw)
@@ -612,10 +631,13 @@ namespace AquaMai.Mods.GameSystem
                         currentStatus = 0;
                     }
 
-                    if (variance < 500)
+                    // ⚠️ 注意：这段逻辑可能会吃掉上面判定成功的触发。
+                    // 比如绝对阈值达到了，但方差变化平缓 (<500) 时，会被强制归零断触。请按需决定是否保留。
+                    if (variance < VarianceThresholdBCDEDown)
                     {
                         currentStatus = 0;
                     }
+
                     return currentStatus;
                 }
             }
