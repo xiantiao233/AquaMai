@@ -1,11 +1,15 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.IO.Ports;
 using System.Threading;
 using AquaMai.Core.Helpers;
 using AquaMai.Config.Attributes;
 using Manager;
 using MelonLoader;
+using UnityEngine; // 新增：用于显示时间戳UI
+using HarmonyLib; // 用于使用 HarmonyPatch
+using Main;       // GameMainObject 所在的命名空间
 
 namespace AquaMai.Mods.GameSystem
 {
@@ -54,15 +58,14 @@ namespace AquaMai.Mods.GameSystem
         [ConfigEntry("E区方varThresh阈值", "默认800。")]
         public static int VarThreshE = 800;
 
-        // ===== 本次新增：A区方差突变补偿 =====
+        // ===== A区方差突变补偿 =====
         [ConfigEntry("A区默认方差突变阈值", "默认2000。快速扫过A区时，若方差(Variance)大于此值也会提前触发")]
         public static int VarianceThresholdADefault = 2000;
 
         [ConfigEntry("A区单独方差阈值覆盖", "格式如 A1:1500,A8:2500。用英文或中文逗号分隔，未指定的按默认值")]
         public static string CustomVarianceOverridesA = "";
-        // ===============================================
 
-        // ===== 本次新增：A区滑动松开与按下的判断阈值 =====
+        // ===== A区滑动松开与按下的判断阈值 =====
         [ConfigEntry("A区松开判定下降阈值", "默认5500。在滑动中，如果Raw值在几帧内下降超过此值，判定为松开手指")]
         public static int AreaAReleaseDropThreshold = 5500;
 
@@ -79,13 +82,19 @@ namespace AquaMai.Mods.GameSystem
         public static double reaADonwTrUP = 0.6;
         [ConfigEntry("A区未触发时的固定基线变化检测，下降", "")]
         public static double reaADonwTrDown = 0.1;
-        // ===============================================
 
         [ConfigEntry("物理通道映射顺序", "从硬件通道0到33对应的逻辑按键名称，用逗号分隔")]
         public static string TouchSheetMapping = "A7,C2,E7,D7,B6,A6,E6,D6,B5,A5,E5,D5,B4,A4,E4,D4,B3,A3,C1,E3,D3,B2,A2,E2,D2,B1,A1,E1,D1,B8,A8,E8,D8,B7";
 
-        [ConfigEntry("Logger", "输出数据")]
-        public static int LoggerTouch = 0;
+        [ConfigEntry("Logger", "输出数据(游戏内Log)")]
+        public static int LoggerTouch = -1;
+
+        // ===== 本次新增：自定义文件日志配置 =====
+        [ConfigEntry("启用数据输出到文件", "设为 true 会把输入流写出至TenoDX_Logs文件夹中")]
+        public static bool EnableFileLog = false;
+
+        [ConfigEntry("文件日志输出区域", "可填A,B,C或特定传感器A1,B2。用逗号分隔")]
+        public static string FileLogTargets = "A,B";
         // ===============================================
 
         private static bool isRunning = false;
@@ -127,9 +136,75 @@ namespace AquaMai.Mods.GameSystem
         private static int _varADefault = -1;
         private static string _varAOverrides = "";
 
+        // 文件输出相关追踪与锁
+        private static string _fileLogTargetsStr = "";
+        private static HashSet<string> fileLogTargetsSet = new HashSet<string>();
+        private static string logDirectory;
+        private static int logFilePart = 1;
+        private static StreamWriter logWriter;
+        private static long currentLogSize = 0;
+        private static readonly long MAX_LOG_SIZE = 512 * 1024; // 512 KB
+        private static readonly object fileLock = new object();
+
+        // ===== 本次新增：时间显示挂载器 =====
+        public class TenoTimeDisplay : MonoBehaviour
+        {
+            private GUIStyle style;
+
+            void OnGUI()
+            {
+                // 延迟初始化，防止 Start() 未执行导致 null 报错
+                if (style == null)
+                {
+                    style = new GUIStyle();
+                    style.fontSize = 250;
+                    style.normal.textColor = Color.black;
+                    style.alignment = TextAnchor.UpperCenter;
+                    style.fontStyle = FontStyle.Bold;
+                }
+
+                // 设置极小的深度值，强制渲染在最顶层，防止被游戏其他UI遮挡
+                GUI.depth = -1000;
+
+                GUI.Label(new Rect(0, 10, Screen.width, 50), DateTime.Now.ToString("HH:mm:ss.fff"), style);
+            }
+        }
+        [HarmonyPatch(typeof(GameMainObject), "Awake")]
+        [HarmonyPostfix]
+        public static void MountTimeUI(GameMainObject __instance)
+        {
+            // 防止重复挂载
+            if (__instance.gameObject.GetComponent<TenoTimeDisplay>() == null)
+            {
+                __instance.gameObject.AddComponent<TenoTimeDisplay>();
+                MelonLogger.Msg("[TenoDXIO] 时间UI组件挂载成功！");
+            }
+        }
+
+
         public static void OnBeforeEnableCheck()
         {
             MelonLogger.Msg("[TenoDXIO] 正在注册 1P 触摸触发器 (支持实时热加载)...");
+
+            // ===== 请将下面这段 try-catch 删除或注释 =====
+            /*
+            try
+            {
+                var go = new GameObject("TenoIOTimeDisplay");
+                // 先设为不销毁，再挂载组件
+                UnityEngine.Object.DontDestroyOnLoad(go);
+                go.AddComponent<TenoTimeDisplay>();
+                MelonLogger.Msg("[TenoDXIO] 时间UI组件挂载成功！");
+            }
+            catch (Exception ex)
+            {
+                MelonLogger.Error("[TenoDXIO] 加载时间UI失败: " + ex.Message);
+            }
+            */
+            // ============================================
+
+            // 初始化新启动的文件日志目录
+            InitFileLogger();
 
             foreach (var name in SENSOR_ORDER)
             {
@@ -141,6 +216,75 @@ namespace AquaMai.Mods.GameSystem
             isRunning = true;
             serialThread = new Thread(SerialReaderThread) { IsBackground = true };
             serialThread.Start();
+        }
+
+        // ===== 本次新增：文件日志引擎 =====
+        private static void InitFileLogger()
+        {
+            if (!EnableFileLog) return;
+            try
+            {
+                logDirectory = Path.Combine(Environment.CurrentDirectory, "TenoDX_Logs", "Log_" + DateTime.Now.ToString("yyyyMMdd_HHmmss"));
+                Directory.CreateDirectory(logDirectory);
+                OpenNewLogFile();
+                MelonLogger.Msg($"[TenoDXIO] 数据文件日志已启动，保存至: {logDirectory}");
+            }
+            catch (Exception e)
+            {
+                MelonLogger.Error("[TenoDXIO] 初始化日志引擎失败: " + e.Message);
+            }
+        }
+
+        private static void OpenNewLogFile()
+        {
+            lock (fileLock)
+            {
+                if (logWriter != null)
+                {
+                    logWriter.Flush();
+                    logWriter.Close();
+                }
+                string path = Path.Combine(logDirectory, $"data_part{logFilePart}.txt");
+                logWriter = new StreamWriter(path, true, System.Text.Encoding.UTF8);
+                logWriter.AutoFlush = true; // 确保程序突然关掉也不会丢数据
+                currentLogSize = 0;
+                logFilePart++;
+            }
+        }
+
+        public static void WriteToFileLog(string name, int raw, float baseline, int threshold, int variance, string subState, int status)
+        {
+            if (!EnableFileLog || logWriter == null) return;
+
+            // 过滤：只有在 LogTargets 中包含了当前区域块名（如'A'）或者完整块名（如'A1'）才写入
+            bool shouldLog = false;
+            lock (configLock)
+            {
+                if (fileLogTargetsSet.Contains(name) || fileLogTargetsSet.Contains(name[0].ToString()))
+                {
+                    shouldLog = true;
+                }
+            }
+
+            if (!shouldLog) return;
+
+            string line = $"[{DateTime.Now:HH:mm:ss.fff}] [{name}] Raw:{raw} Base:{baseline:F1} Thresh:{threshold} Var:{variance} Sub:{subState} Stat:{status}";
+
+            lock (fileLock)
+            {
+                try
+                {
+                    logWriter.WriteLine(line);
+                    // 粗略估算写入字节：一行字符串长度 + 回车换行符长度
+                    currentLogSize += line.Length + 2;
+
+                    if (currentLogSize >= MAX_LOG_SIZE)
+                    {
+                        OpenNewLogFile();
+                    }
+                }
+                catch { }
+            }
         }
 
         private static ulong ProvideTouchStatus(int playerNo)
@@ -159,7 +303,8 @@ namespace AquaMai.Mods.GameSystem
                 _overrides != CustomThresholdOverrides ||
                 _thA != ThresholdA || _thB != ThresholdB || _thC != ThresholdC || _thD != ThresholdD || _thE != ThresholdE ||
                 _varADefault != VarianceThresholdADefault ||
-                _varAOverrides != CustomVarianceOverridesA
+                _varAOverrides != CustomVarianceOverridesA ||
+                _fileLogTargetsStr != FileLogTargets
             );
 
             if (requireSerialRestart)
@@ -180,11 +325,13 @@ namespace AquaMai.Mods.GameSystem
                 _thA = ThresholdA; _thB = ThresholdB; _thC = ThresholdC; _thD = ThresholdD; _thE = ThresholdE;
                 _varADefault = VarianceThresholdADefault;
                 _varAOverrides = CustomVarianceOverridesA;
+                _fileLogTargetsStr = FileLogTargets;
 
                 lock (configLock)
                 {
                     LOGICAL_TO_CHANNEL.Clear();
                     SENSOR_VARIANCE_THRESHOLDS.Clear();
+                    fileLogTargetsSet.Clear();
                     Array.Clear(CHANNEL_TO_MASK, 0, CHANNEL_TO_MASK.Length);
 
                     var sheet = _map.Split(new[] { ',', '，' }, StringSplitOptions.RemoveEmptyEntries);
@@ -243,6 +390,16 @@ namespace AquaMai.Mods.GameSystem
                                 string key = parts[0].Trim().ToUpper();
                                 if (SENSOR_VARIANCE_THRESHOLDS.ContainsKey(key)) SENSOR_VARIANCE_THRESHOLDS[key] = val;
                             }
+                        }
+                    }
+
+                    // 解析文件日志输出区域目标
+                    if (!string.IsNullOrWhiteSpace(_fileLogTargetsStr))
+                    {
+                        var targets = _fileLogTargetsStr.Split(new[] { ',', '，' }, StringSplitOptions.RemoveEmptyEntries);
+                        foreach (var tgt in targets)
+                        {
+                            fileLogTargetsSet.Add(tgt.Trim().ToUpper());
                         }
                     }
                 }
@@ -463,6 +620,11 @@ namespace AquaMai.Mods.GameSystem
 
                 int variance = raw - (int)rawDefault;
 
+                if (chIdx == LoggerTouch)
+                {
+                    MelonLogger.Msg($"Raw: {raw}, Baseline: {baseline:F1}, Threshold: {threshold}, Variance: {variance}");
+                }
+
                 // ============ A 区判定 ============
                 if (block == 'A')
                 {
@@ -508,10 +670,14 @@ namespace AquaMai.Mods.GameSystem
                             {
                                 int oldestHistory2 = history2[0]; // 等同于原 history2.Peek()
                                 int diff = current - oldestHistory2;
-                                if (diff <= 500)
+                                if (history2.Count >= 8 && rawTouchedLock == 0)
                                 {
-                                    rawTouched = oldestHistory2;
-                                    rawTouchedLock = 1;
+                                    // 最简单的修复：只要当前值明显高于基线，就抓取当前值作为触摸基准
+                                    if (current > effThreshold)
+                                    {
+                                        rawTouched = current;
+                                        rawTouchedLock = 1;
+                                    }
                                 }
                             }
 
@@ -573,12 +739,10 @@ namespace AquaMai.Mods.GameSystem
                             }
                             else
                             {
-                                // 触发条件核心逻辑：
-                                // a. 快速滑动：单帧变化率足够大 (delta > 600) 或总方差超过了配置文件中的突变阈值
-                                // b. 防抬手抖动：必须是正向增加 (delta > 0)，完美排除手指抬起时的断崖式下降
-                                // c. 防抢跑前夕：当前 raw 不能太接近固定基线（预留 1500 余量，马上要摸到固定基线的交给 fixed 处理）
 
-                                bool isFastSlide = (delta > 600 || variance > currentVarThreshold);
+                                int var001 = 450;
+                                // 触发条件核心逻辑
+                                bool isFastSlide = (delta > var001 || variance > currentVarThreshold);
                                 bool isRising = (delta > 0);
                                 bool isNotPrePress = (raw < (effThreshold - 800));
 
@@ -592,12 +756,11 @@ namespace AquaMai.Mods.GameSystem
                         }
                     }
 
-                    if (chIdx == LoggerTouch)
-                    {
-                        MelonLogger.Msg($"Raw: {raw}, Baseline: {baseline:F1}, Threshold: {threshold}, Variance: {variance},  SubState: {subState}");
-                    }
-
                     baseline = rawDefault;
+
+                    // 写出本帧日志到文件
+                    WriteToFileLog(logicalName, raw, baseline, threshold, variance, subState ?? "None", currentStatus);
+
                     return currentStatus;
                 }
                 // ============ B、C、D、E 区判定 ============
@@ -631,12 +794,13 @@ namespace AquaMai.Mods.GameSystem
                         currentStatus = 0;
                     }
 
-                    // ⚠️ 注意：这段逻辑可能会吃掉上面判定成功的触发。
-                    // 比如绝对阈值达到了，但方差变化平缓 (<500) 时，会被强制归零断触。请按需决定是否保留。
                     if (variance < VarianceThresholdBCDEDown)
                     {
                         currentStatus = 0;
                     }
+
+                    // 写出本帧日志到文件
+                    WriteToFileLog(logicalName, raw, baseline, threshold, variance, "None", currentStatus);
 
                     return currentStatus;
                 }
