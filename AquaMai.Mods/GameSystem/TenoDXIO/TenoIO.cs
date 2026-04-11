@@ -29,54 +29,61 @@ namespace AquaMai.Mods.GameSystem
         [ConfigEntry("启用固定触发模式", "设置为 false 则使用方差触发")]
         public static bool EnableFixedTriggerMode = true;
 
-        [ConfigEntry("A区固定触发基础")] public static int FixedTriggerDefaultA = 50000;
+        [ConfigEntry("A区固定触发基础")] public static int FixedTriggerDefaultA = 50300;
         [ConfigEntry("B区固定触发基础")] public static int FixedTriggerDefaultB = 48000;
         [ConfigEntry("C区固定触发基础")] public static int FixedTriggerDefaultC = 47000;
         [ConfigEntry("D区固定触发基础")] public static int FixedTriggerDefaultD = 50000;
         [ConfigEntry("E区固定触发基础")] public static int FixedTriggerDefaultE = 50000;
 
         [ConfigEntry("A区灵敏度 (通常为30)")] public static int ThresholdA = 30;
-        [ConfigEntry("B区灵敏度 (通常为30)")] public static int ThresholdB = 30;
-        [ConfigEntry("C区灵敏度 (通常为28)")] public static int ThresholdC = 28;
-        [ConfigEntry("D区灵敏度 (通常为30)")] public static int ThresholdD = 30;
-        [ConfigEntry("E区灵敏度 (通常为30)")] public static int ThresholdE = 30;
+        [ConfigEntry("B区灵敏度 (通常为30)")] public static int ThresholdB = 25;
+        [ConfigEntry("C区灵敏度 (通常为28)")] public static int ThresholdC = 5;
+        [ConfigEntry("D区灵敏度 (通常为30)")] public static int ThresholdD = 25;
+        [ConfigEntry("E区灵敏度 (通常为30)")] public static int ThresholdE = 13;
 
         [ConfigEntry("单独区块灵敏度覆盖", "格式如 A7:80,B2:40。用英文或中文逗号分隔")]
         public static string CustomThresholdOverrides = "";
 
         [ConfigEntry("BCDE区方差突变触发阈值", "默认500")]
-        public static int VarianceThresholdBCDE = 500;
+        public static int VarianceThresholdBCDE = 600;
         [ConfigEntry("BCDE区方差突变触发阈值", "")]
         public static int VarianceThresholdBCDEDown = 300;
 
         [ConfigEntry("B区方varThresh阈值", "默认800。")]
-        public static int VarThreshB = 800;
+        public static int VarThreshB = 530;
         [ConfigEntry("C区方varThresh阈值", "默认800。")]
-        public static int VarThreshC = 800;
+        public static int VarThreshC = 400;
         [ConfigEntry("D区方varThresh阈值", "默认800。")]
-        public static int VarThreshD = 800;
+        public static int VarThreshD = 450;
         [ConfigEntry("E区方varThresh阈值", "默认800。")]
-        public static int VarThreshE = 800;
+        public static int VarThreshE = 150;
 
         // ===== A区方差突变补偿 =====
         [ConfigEntry("A区默认方差突变阈值", "默认2000。快速扫过A区时，若方差(Variance)大于此值也会提前触发")]
-        public static int VarianceThresholdADefault = 2000;
+        public static int VarianceThresholdADefault = 3000;
 
         [ConfigEntry("A区单独方差阈值覆盖", "格式如 A1:1500,A8:2500。用英文或中文逗号分隔，未指定的按默认值")]
         public static string CustomVarianceOverridesA = "";
 
+        // ===== 新增：A区Delta触发(var001)配置 =====
+        [ConfigEntry("A区Delta触发默认阈值(var001)", "默认450。用于捕捉突然滑动")]
+        public static int Var001Default = 600;
+
+        [ConfigEntry("A区单独Delta阈值覆盖(var001)", "格式如 A1:500,A8:400。用英文或中文逗号分隔，未指定的按默认值")]
+        public static string CustomVar001OverridesA = "A2:300,A3:400,A6:300,A7:400";
+
         // ===== A区滑动松开与按下的判断阈值 =====
         [ConfigEntry("A区松开判定下降阈值", "默认5500。在滑动中，如果Raw值在几帧内下降超过此值，判定为松开手指")]
-        public static int AreaAReleaseDropThreshold = 5500;
+        public static int AreaAReleaseDropThreshold = 1500;
 
         [ConfigEntry("A区按下判定上升阈值", "默认5000。在刚被判定为松开(raw10)的状态下，如果Raw值上升超过此值，再次判定为按下")]
-        public static int AreaAPressRiseThreshold = 5000;
+        public static int AreaAPressRiseThreshold = 1000;
 
         [ConfigEntry("A区防断管子偏移值", "默认600。 当被按下时，如果Raw值在几帧内下降超过此值但仍高于rawtouched+此值松开阈值，认为是断管子误判，保持按下状态")]
-        public static int AreaAPressBreakThreshold = 800;
+        public static int AreaAPressBreakThreshold = 700;
 
         [ConfigEntry("A区瞬发限制", "默认10(130ms), 在瞬发之后10帧数据内不会被再次激活 设为-1禁用。 \n 用于扫圈时不小心用手指扫过或者扫过边缘")]
-        public static int AreaAFastSlideFpsLimit = 10;
+        public static int AreaAFastSlideFpsLimit = -1;
 
         [ConfigEntry("A区未触发时的固定基线变化检测，上升", "")]
         public static double reaADonwTrUP = 0.6;
@@ -84,7 +91,7 @@ namespace AquaMai.Mods.GameSystem
         public static double reaADonwTrDown = 0.1;
 
         [ConfigEntry("物理通道映射顺序", "从硬件通道0到33对应的逻辑按键名称，用逗号分隔")]
-        public static string TouchSheetMapping = "A7,C2,E7,D7,B6,A6,E6,D6,B5,A5,E5,D5,B4,A4,E4,D4,B3,A3,C1,E3,D3,B2,A2,E2,D2,B1,A1,E1,D1,B8,A8,E8,D8,B7";
+        public static string TouchSheetMapping = "A8,E8,D8,B7,A7,C2,E7,D7,B6,A6,E6,D6,B5,A5,E5,D5,B4,A4,E4,D4,B3,A3,C1,E3,D3,B2,A2,E2,D2,B1,A1,E1,D1,B8";
 
         [ConfigEntry("Logger", "输出数据(游戏内Log)")]
         public static int LoggerTouch = -1;
@@ -116,6 +123,7 @@ namespace AquaMai.Mods.GameSystem
         private static Dictionary<string, int> LOGICAL_TO_CHANNEL = new Dictionary<string, int>();
         private static Dictionary<string, int> SENSOR_THRESHOLDS = new Dictionary<string, int>();
         private static Dictionary<string, int> SENSOR_VARIANCE_THRESHOLDS = new Dictionary<string, int>();
+        private static Dictionary<string, int> SENSOR_VAR001_THRESHOLDS = new Dictionary<string, int>(); // 新增字典
         private static Dictionary<string, CapsenseState> allTrackers = new Dictionary<string, CapsenseState>();
 
         // 性能优化：提前计算好每个硬件通道对应的 TouchPanelArea Mask
@@ -135,6 +143,8 @@ namespace AquaMai.Mods.GameSystem
         private static int _thA = -1, _thB = -1, _thC = -1, _thD = -1, _thE = -1;
         private static int _varADefault = -1;
         private static string _varAOverrides = "";
+        private static int _var001Default = -1;       // 新增
+        private static string _var001Overrides = ""; // 新增
 
         // 文件输出相关追踪与锁
         private static string _fileLogTargetsStr = "";
@@ -143,7 +153,7 @@ namespace AquaMai.Mods.GameSystem
         private static int logFilePart = 1;
         private static StreamWriter logWriter;
         private static long currentLogSize = 0;
-        private static readonly long MAX_LOG_SIZE = 512 * 1024; // 512 KB
+        private static readonly long MAX_LOG_SIZE = 512 * 1024; // 2 MB
         private static readonly object fileLock = new object();
 
         // ===== 本次新增：时间显示挂载器 =====
@@ -185,23 +195,6 @@ namespace AquaMai.Mods.GameSystem
         public static void OnBeforeEnableCheck()
         {
             MelonLogger.Msg("[TenoDXIO] 正在注册 1P 触摸触发器 (支持实时热加载)...");
-
-            // ===== 请将下面这段 try-catch 删除或注释 =====
-            /*
-            try
-            {
-                var go = new GameObject("TenoIOTimeDisplay");
-                // 先设为不销毁，再挂载组件
-                UnityEngine.Object.DontDestroyOnLoad(go);
-                go.AddComponent<TenoTimeDisplay>();
-                MelonLogger.Msg("[TenoDXIO] 时间UI组件挂载成功！");
-            }
-            catch (Exception ex)
-            {
-                MelonLogger.Error("[TenoDXIO] 加载时间UI失败: " + ex.Message);
-            }
-            */
-            // ============================================
 
             // 初始化新启动的文件日志目录
             InitFileLogger();
@@ -304,6 +297,8 @@ namespace AquaMai.Mods.GameSystem
                 _thA != ThresholdA || _thB != ThresholdB || _thC != ThresholdC || _thD != ThresholdD || _thE != ThresholdE ||
                 _varADefault != VarianceThresholdADefault ||
                 _varAOverrides != CustomVarianceOverridesA ||
+                _var001Default != Var001Default ||                  // 新增校验
+                _var001Overrides != CustomVar001OverridesA ||       // 新增校验
                 _fileLogTargetsStr != FileLogTargets
             );
 
@@ -325,12 +320,15 @@ namespace AquaMai.Mods.GameSystem
                 _thA = ThresholdA; _thB = ThresholdB; _thC = ThresholdC; _thD = ThresholdD; _thE = ThresholdE;
                 _varADefault = VarianceThresholdADefault;
                 _varAOverrides = CustomVarianceOverridesA;
+                _var001Default = Var001Default;                     // 新增赋值
+                _var001Overrides = CustomVar001OverridesA;          // 新增赋值
                 _fileLogTargetsStr = FileLogTargets;
 
                 lock (configLock)
                 {
                     LOGICAL_TO_CHANNEL.Clear();
                     SENSOR_VARIANCE_THRESHOLDS.Clear();
+                    SENSOR_VAR001_THRESHOLDS.Clear();               // 新增清理
                     fileLogTargetsSet.Clear();
                     Array.Clear(CHANNEL_TO_MASK, 0, CHANNEL_TO_MASK.Length);
 
@@ -354,6 +352,7 @@ namespace AquaMai.Mods.GameSystem
                             case 'A':
                                 SENSOR_THRESHOLDS[name] = _thA;
                                 SENSOR_VARIANCE_THRESHOLDS[name] = _varADefault;
+                                SENSOR_VAR001_THRESHOLDS[name] = _var001Default; // 赋初值
                                 break;
                             case 'B': SENSOR_THRESHOLDS[name] = _thB; break;
                             case 'C': SENSOR_THRESHOLDS[name] = _thC; break;
@@ -389,6 +388,21 @@ namespace AquaMai.Mods.GameSystem
                             {
                                 string key = parts[0].Trim().ToUpper();
                                 if (SENSOR_VARIANCE_THRESHOLDS.ContainsKey(key)) SENSOR_VARIANCE_THRESHOLDS[key] = val;
+                            }
+                        }
+                    }
+
+                    // ===== 解析A区 var001 覆盖 =====
+                    if (!string.IsNullOrWhiteSpace(_var001Overrides))
+                    {
+                        var pairs = _var001Overrides.Split(new[] { ',', '，' }, StringSplitOptions.RemoveEmptyEntries);
+                        foreach (var pair in pairs)
+                        {
+                            var parts = pair.Split(new[] { ':', '：' }, StringSplitOptions.RemoveEmptyEntries);
+                            if (parts.Length == 2 && int.TryParse(parts[1].Trim(), out int val))
+                            {
+                                string key = parts[0].Trim().ToUpper();
+                                if (SENSOR_VAR001_THRESHOLDS.ContainsKey(key)) SENSOR_VAR001_THRESHOLDS[key] = val;
                             }
                         }
                     }
@@ -739,8 +753,11 @@ namespace AquaMai.Mods.GameSystem
                             }
                             else
                             {
+                                // ===== 获取当前A区的var001动态配置 =====
+                                int var001 = SENSOR_VAR001_THRESHOLDS.ContainsKey(logicalName)
+                                                ? SENSOR_VAR001_THRESHOLDS[logicalName]
+                                                : Var001Default;
 
-                                int var001 = 450;
                                 // 触发条件核心逻辑
                                 bool isFastSlide = (delta > var001 || variance > currentVarThreshold);
                                 bool isRising = (delta > 0);
