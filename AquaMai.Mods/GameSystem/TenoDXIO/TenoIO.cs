@@ -802,7 +802,7 @@ namespace AquaMai.Mods.GameSystem
                     {
                         currentStatus = 1;
                     }
-                    else if (variance > VarianceThresholdBCDE)
+                    else if (variance > VarianceThresholdBCDE && VarianceThresholdBCDE > 0)
                     {
                         currentStatus = 1;
                     }
@@ -811,7 +811,7 @@ namespace AquaMai.Mods.GameSystem
                         currentStatus = 0;
                     }
 
-                    if (variance < VarianceThresholdBCDEDown)
+                    if (variance < VarianceThresholdBCDEDown && VarianceThresholdBCDEDown > 0)
                     {
                         currentStatus = 0;
                     }
