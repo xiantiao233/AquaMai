@@ -81,9 +81,9 @@ namespace AquaMai.Mods.GameSystem
         public static int AreaAFastSlideFpsLimit = -1;
 
         [ConfigEntry("A区未触发时的固定基线变化检测，上升", "")]
-        public static double reaADonwTrUP = 0.6;
+        public static double reaADonwTrUP = 0.8;
         [ConfigEntry("A区未触发时的固定基线变化检测，下降", "")]
-        public static double reaADonwTrDown = 0.1;
+        public static double reaADonwTrDown = 0.25;
 
         [ConfigEntry("物理通道映射顺序", "从硬件通道0到33对应的逻辑按键名称，用逗号分隔 (修改后需重启生效)")]
         public static string TouchSheetMapping = "A8,E8,D8,B7,A7,C2,E7,D7,B6,A6,E6,D6,B5,A5,E5,D5,B4,A4,E4,D4,B3,A3,C1,E3,D3,B2,A2,E2,D2,B1,A1,E1,D1,B8";
@@ -95,7 +95,7 @@ namespace AquaMai.Mods.GameSystem
         public static bool EnableFileLog = false;
 
         [ConfigEntry("文件日志输出区域", "可填A,B,C或特定传感器A1,B2。用逗号分隔 (修改后需重启生效)")]
-        public static string FileLogTargets = "A,B";
+        public static string FileLogTargets = "A";
 
         // ================= 模块状态与文件日志 =================
         private static readonly bool[] fileLogTargetBlocks = new bool[256];
@@ -105,7 +105,7 @@ namespace AquaMai.Mods.GameSystem
         private static int logFilePart = 1;
         private static StreamWriter logWriter;
         private static long currentLogSize = 0;
-        private static readonly long MAX_LOG_SIZE = 512 * 1024; // 2 MB
+        private static readonly long MAX_LOG_SIZE = 4096 * 1024; // 2 MB
         private static readonly object fileLock = new object();
 
         // ===== 时间显示挂载器 =====
@@ -117,7 +117,7 @@ namespace AquaMai.Mods.GameSystem
                 if (style == null)
                 {
                     style = new GUIStyle();
-                    style.fontSize = 250;
+                    style.fontSize = 180;
                     style.normal.textColor = Color.black;
                     style.alignment = TextAnchor.UpperCenter;
                     style.fontStyle = FontStyle.Bold;

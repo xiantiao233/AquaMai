@@ -399,21 +399,82 @@ namespace AquaMai.Mods.GameSystem
                     }
                     variance = raw - (int)baseline;
 
-                    if (IsTriggered(raw, variance, threshold) || (variance > TenoDXIO.VarianceThresholdBCDE && TenoDXIO.VarianceThresholdBCDE > 0))
+                    history.Add(raw);
+
+                    bool isTriggered = IsTriggered(raw, variance, threshold) ||
+                                       (variance > TenoDXIO.VarianceThresholdBCDE && TenoDXIO.VarianceThresholdBCDE > 0);
+
+                    if (currentStatus == 1)
                     {
-                        currentStatus = 1;
+                        if (raw > rawTouched) rawTouched = raw;
                     }
                     else
                     {
-                        currentStatus = 0;
+                        rawTouched = raw;
                     }
 
-                    if (variance < TenoDXIO.VarianceThresholdBCDEDown && TenoDXIO.VarianceThresholdBCDEDown > 0)
+                    if (history.Count >= 1)
                     {
-                        currentStatus = 0;
+                        int oldest = history[0];
+
+                        if (isTriggered)
+                        {
+                            if (subState != TouchSubState.Raw10)
+                            {
+                                // 【优化1】放宽下降判断阈值。如果配置文件里是默认的300，就保底拉高到800，避免过敏
+                                int dropThresh = TenoDXIO.VarianceThresholdBCDEDown > 400 ? TenoDXIO.VarianceThresholdBCDEDown : 800;
+
+                                // 获取当前的绝对触发线
+                                int effThreshold = TenoDXIO.EnableFixedTriggerMode ? ((threshold - 30) * 100 + GetBlockDefault()) : threshold;
+
+                                // 【优化2】防断保护：如果当前值依然比触发线高出1500，说明手绝对死死按在上面，只是姿势变了，不断开
+                                bool isPressingHard = raw > (effThreshold + 1500);
+
+                                // 只有在“没有重压”的前提下，且掉点超过阈值，才判定为微抬释放
+                                if (!isPressingHard && (oldest - raw >= dropThresh || rawTouched - raw >= dropThresh * 2))
+                                {
+                                    currentStatus = 0;
+                                    subState = TouchSubState.Raw10;
+                                    history.Clear();
+                                    history.Add(raw);
+                                }
+                                else
+                                {
+                                    currentStatus = 1;
+                                }
+                            }
+                            else
+                            {
+                                // 虚拟释放状态下的“重新按下”阈值，保底给到600
+                                int riseThresh = TenoDXIO.VarianceThresholdBCDEDown > 400 ? TenoDXIO.VarianceThresholdBCDEDown : 600;
+
+                                if (raw - oldest >= riseThresh)
+                                {
+                                    currentStatus = 1;
+                                    subState = TouchSubState.None;
+                                    rawTouched = raw;
+                                    history.Clear();
+                                    history.Add(raw);
+                                }
+                                else
+                                {
+                                    currentStatus = 0;
+                                }
+                            }
+                        }
+                        else
+                        {
+                            currentStatus = 0;
+                            subState = TouchSubState.None;
+                        }
+                    }
+                    else
+                    {
+                        currentStatus = isTriggered ? 1 : 0;
                     }
 
-                    TenoDXIO.WriteToFileLog(logicalName, raw, baseline, threshold, variance, "None", currentStatus);
+                    string subStr = subState == TouchSubState.None ? "None" : (subState == TouchSubState.Raw10 ? "raw10" : "raw01");
+                    TenoDXIO.WriteToFileLog(logicalName, raw, baseline, threshold, variance, subStr, currentStatus);
                     return currentStatus;
                 }
             }
