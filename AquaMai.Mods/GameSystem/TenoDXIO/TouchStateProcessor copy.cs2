@@ -204,12 +204,12 @@ namespace AquaMai.Mods.GameSystem
                 int diff_deriv_2 = current_val - GetHistory(1);
                 int diff_deriv_3 = current_val - GetHistory(2);
 
-                // 默认状态必须是 false
+                // 【核心修复】：默认状态必须是 false，完全对齐 Python 源码
                 bool on = false;
 
                 if (block == 'A') // === 组 0 ===
                 {
-                    // A 区的复杂逻辑依赖上一帧的状态，显式继承
+                    // A 区的复杂逻辑依赖上一帧的状态，所以显式继承
                     on = is_pressed;
 
                     int customDiff = override_A[physicalChannel];
@@ -232,18 +232,13 @@ namespace AquaMai.Mods.GameSystem
                     int absolute_safe_diff = TenoDXIO.QuickReleaseLine;
 
                     if (diff < 200) lock_releasing = false;
+                    if (lock_releasing && diff_deriv > 150 && diff > on_diff) lock_releasing = false;
 
-                    // 【修复 Miss 核心 1】：强行击穿 ITO 的波形死锁。
-                    // 只要 Diff 足够高（稳稳按死，超过触发阈值的 1.5 倍），无视任何导数条件，强行砸碎松开锁！
-                    if ((lock_releasing && diff_deriv > 150 && diff > on_diff) || diff > on_diff * 1.5)
+                    // 【修复核心】：只要检测到明确的快速重按，全面击碎历史遗留的所有松开锁
+                    if (diff_deriv > 150 && diff > on_diff)
                     {
                         lock_releasing = false;
-                    }
-
-                    if ((diff_deriv > 150 && diff > on_diff) || diff > on_diff * 1.5)
-                    {
-                        lock_releasing = false;
-                        diff_deriv_down_count = 0;
+                        diff_deriv_down_count = 0; // 强行解除 down_count 盲区，防止连击被吞
                     }
 
                     if (diff > on_diff)
@@ -296,8 +291,7 @@ namespace AquaMai.Mods.GameSystem
 
                     if (diff > c_diff || diff_deriv > c_deriv_t)
                     {
-                        // 【修复 Miss 核心 2】：防止 C 区长按时被波形下跌误触发断触
-                        if (diff_deriv < c_deriv_r && diff < c_diff * 1.5)
+                        if (diff_deriv < c_deriv_r)
                         {
                             on = false;
                         }
@@ -335,36 +329,23 @@ namespace AquaMai.Mods.GameSystem
                     int bde_diff = override_BDE_Diff[physicalChannel] != -1 ? override_BDE_Diff[physicalChannel] : default_diff;
                     int bde_deriv_r = override_BDE_DerivR[physicalChannel] != -1 ? override_BDE_DerivR[physicalChannel] : default_deriv_r;
 
+                    // 获取上一帧的差值 (last_diff)
                     int last_diff = GetHistory(0) - setup_raw;
 
-                    // 【修复 Late 核心】：0延迟自适应触发 + 波形保持
-                    // 1. 如果信号极强(越过1.5倍阈值)，立刻触发，彻底消灭 Late。
-                    if (diff > bde_diff * 1.5)
+                    // 【核心修改】：实现至少 2 帧防抖与状态维持
+                    // 1. 触发判定：当前帧与上一帧的 diff 均大于阈值，判定为有效按下（过滤单帧尖峰）
+                    if (diff > bde_diff && last_diff > bde_diff)
                     {
                         on = true;
                     }
-                    // 2. 如果信号刚刚过阈值，看上一帧是否在上升期（过滤单帧瞬间脉冲）
-                    else if (diff > bde_diff && last_diff > bde_diff / 2)
-                    {
-                        on = true;
-                    }
-                    // 3. 如果原本就在按下状态，并且值还在阈值上，维持按下（抗断触）
+                    // 2. 长按维持：如果已经是按下状态，只需当前帧满足阈值即可维持，防止微小波动断触
                     else if (is_pressed && diff > bde_diff)
                     {
                         on = true;
                     }
 
-                    // 释放逻辑：波形下跌不能盲目释放，只有 Diff 掉落到相对危险区才信导数
+                    // 3. 快速释放判定：保留原始的负向导数释放逻辑，保证抬手灵敏度
                     if (diff_deriv < bde_deriv_r)
-                    {
-                        if (diff < bde_diff * 1.5) // 防止长按期间的高位波形起伏引发断触
-                        {
-                            on = false;
-                        }
-                    }
-
-                    // 绝对兜底释放
-                    if (diff <= bde_diff / 2)
                     {
                         on = false;
                     }

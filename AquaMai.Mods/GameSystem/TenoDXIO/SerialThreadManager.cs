@@ -12,6 +12,10 @@ namespace AquaMai.Mods.GameSystem
         private static Thread serialThread;
         private static SerialPort serialPort;
 
+        // ================= 滤波器状态 =================
+        private static float[] filterHistory = new float[34];
+        private static bool isFirstFrame = true;
+
         public static void Start()
         {
             if (isRunning) return;
@@ -46,11 +50,13 @@ namespace AquaMai.Mods.GameSystem
                 {
                     try
                     {
-                        serialPort = new SerialPort(TenoDXIO.COMPort, TenoDXIO.BaudRate);
+                        // 波特率硬编码为 115200
+                        serialPort = new SerialPort(TenoDXIO.COMPort, 115200);
                         serialPort.ReadTimeout = 100;
                         serialPort.Open();
-                        MelonLogger.Msg($"[TenoDXIO] 成功连接输入串口: {TenoDXIO.COMPort} @ {TenoDXIO.BaudRate} bps");
+                        MelonLogger.Msg($"[TenoDXIO] 成功连接输入串口: {TenoDXIO.COMPort} @ 115200 bps");
 
+                        isFirstFrame = true; // 每次重连串口时，重置滤波器的首帧状态
                         TouchStateProcessor.ResetCalibration();
                     }
                     catch (Exception)
@@ -79,12 +85,36 @@ namespace AquaMai.Mods.GameSystem
                                     ushort[] channels = new ushort[34];
                                     for (int i = 0; i < 34; i++)
                                     {
-                                        channels[i] = (ushort)(buffer[1 + i * 2] | (buffer[2 + i * 2] << 8));
+                                        ushort raw = (ushort)(buffer[1 + i * 2] | (buffer[2 + i * 2] << 8));
+
+                                        // IIR 滤波逻辑
+                                        if (TenoDXIO.IIRFilterFactor > 1)
+                                        {
+                                            if (isFirstFrame)
+                                            {
+                                                filterHistory[i] = raw; // 首帧直接赋值
+                                            }
+                                            else
+                                            {
+                                                // Y[n] = Y[n-1] + (X[n] - Y[n-1]) / Factor
+                                                filterHistory[i] += (raw - filterHistory[i]) / (float)TenoDXIO.IIRFilterFactor;
+                                            }
+                                            // 四舍五入后转回 ushort
+                                            channels[i] = (ushort)Math.Round(filterHistory[i]);
+                                        }
+                                        else
+                                        {
+                                            // 未开启滤波
+                                            channels[i] = raw;
+                                        }
                                     }
 
-                                    // 将解包后的 34 通道数据推给触摸处理器
-                                    TouchStateProcessor.ProcessFrame(channels);
+                                    if (isFirstFrame && TenoDXIO.IIRFilterFactor > 1)
+                                    {
+                                        isFirstFrame = false;
+                                    }
 
+                                    TouchStateProcessor.ProcessFrame(channels);
                                     buffer.RemoveRange(0, 70);
                                 }
                                 else
@@ -109,7 +139,6 @@ namespace AquaMai.Mods.GameSystem
                     CloseSerial();
                 }
             }
-
             CloseSerial();
         }
     }

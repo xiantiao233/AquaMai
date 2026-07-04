@@ -17,89 +17,115 @@ namespace AquaMai.Mods.GameSystem
       zh: "TenoDXIO Touch Trigger")]
     public class TenoDXIO
     {
-        // ================= 配置文件管理 =================
+        // ================= 串口配置 =================
         [ConfigEntry("串口号", "主控板的COM口，例如 COM92 (修改后需重启生效)")]
         public static string COMPort = "COM92";
 
-        [ConfigEntry("波特率")]
-        public static int BaudRate = 230400;
+        [ConfigEntry("IIR滤波器系数", "可选值: 1(关闭滤波), 2(即1/2), 4(即1/4), 8(即1/8), 16(即1/16)")]
+        public static int IIRFilterFactor = 1;
 
-        [ConfigEntry("启用固定触发模式", "设置为 false 则使用方差触发")]
-        public static bool EnableFixedTriggerMode = true;
-
-        [ConfigEntry("A区固定触发基础")] public static int FixedTriggerDefaultA = 50300;
-        [ConfigEntry("B区固定触发基础")] public static int FixedTriggerDefaultB = 48000;
-        [ConfigEntry("C区固定触发基础")] public static int FixedTriggerDefaultC = 47000;
-        [ConfigEntry("D区固定触发基础")] public static int FixedTriggerDefaultD = 50000;
-        [ConfigEntry("E区固定触发基础")] public static int FixedTriggerDefaultE = 50000;
-
-        [ConfigEntry("A区灵敏度 (通常为30)")] public static int ThresholdA = 30;
-        [ConfigEntry("B区灵敏度 (通常为30)")] public static int ThresholdB = 25;
-        [ConfigEntry("C区灵敏度 (通常为28)")] public static int ThresholdC = 5;
-        [ConfigEntry("D区灵敏度 (通常为30)")] public static int ThresholdD = 25;
-        [ConfigEntry("E区灵敏度 (通常为30)")] public static int ThresholdE = 13;
-
-        [ConfigEntry("单独区块灵敏度覆盖", "格式如 A7:80,B2:40。用英文或中文逗号分隔 (修改后需重启生效)")]
-        public static string CustomThresholdOverrides = "";
-
-        [ConfigEntry("BCDE区方差突变触发阈值", "默认500")]
-        public static int VarianceThresholdBCDE = 600;
-        [ConfigEntry("BCDE区方差突变触发阈值", "")]
-        public static int VarianceThresholdBCDEDown = 300;
-
-        [ConfigEntry("B区方varThresh阈值", "默认530")]
-        public static int VarThreshB = 530;
-        [ConfigEntry("C区方varThresh阈值", "默认400")]
-        public static int VarThreshC = 400;
-        [ConfigEntry("D区方varThresh阈值", "默认450")]
-        public static int VarThreshD = 450;
-        [ConfigEntry("E区方varThresh阈值", "默认150")]
-        public static int VarThreshE = 150;
-
-        [ConfigEntry("A区默认方差突变阈值", "默认2000。快速扫过A区时，若方差(Variance)大于此值也会提前触发")]
-        public static int VarianceThresholdADefault = 3000;
-
-        [ConfigEntry("A区单独方差阈值覆盖", "格式如 A1:1500,A8:2500。用英文或中文逗号分隔，未指定的按默认值 (修改后需重启生效)")]
-        public static string CustomVarianceOverridesA = "";
-
-        [ConfigEntry("A区Delta触发默认阈值(var001)", "默认450。用于捕捉突然滑动")]
-        public static int Var001Default = 600;
-
-        [ConfigEntry("A区单独Delta阈值覆盖(var001)", "格式如 A1:500,A8:400。用英文或中文逗号分隔，未指定的按默认值 (修改后需重启生效)")]
-        public static string CustomVar001OverridesA = "A2:300,A3:400,A6:300,A7:400";
-
-        [ConfigEntry("A区松开判定下降阈值", "默认5500。在滑动中，如果Raw值在几帧内下降超过此值，判定为松开手指")]
-        public static int AreaAReleaseDropThreshold = 1500;
-
-        [ConfigEntry("A区按下判定上升阈值", "默认5000。在刚被判定为松开(raw10)的状态下，如果Raw值上升超过此值，再次判定为按下")]
-        public static int AreaAPressRiseThreshold = 1000;
-
-        [ConfigEntry("A区防断管子偏移值", "默认600。 当被按下时，如果Raw值在几帧内下降超过此值但仍高于rawtouched+此值松开阈值，认为是断管子误判，保持按下状态")]
-        public static int AreaAPressBreakThreshold = 700;
-
-        [ConfigEntry("A区瞬发限制", "默认10(130ms), 在瞬发之后10帧数据内不会被再次激活 设为-1禁用。 \n 用于扫圈时不小心用手指扫过或者扫过边缘")]
-        public static int AreaAFastSlideFpsLimit = -1;
-
-        [ConfigEntry("A区未触发时的固定基线变化检测，上升", "")]
-        public static double reaADonwTrUP = 0.8;
-        [ConfigEntry("A区未触发时的固定基线变化检测，下降", "")]
-        public static double reaADonwTrDown = 0.25;
-
-        [ConfigEntry("物理通道映射顺序", "从硬件通道0到33对应的逻辑按键名称，用逗号分隔 (修改后需重启生效)")]
-        public static string TouchSheetMapping = "A8,E8,D8,B7,A7,C2,E7,D7,B6,A6,E6,D6,B5,A5,E5,D5,B4,A4,E4,D4,B3,A3,C1,E3,D3,B2,A2,E2,D2,B1,A1,E1,D1,B8";
-
-        [ConfigEntry("Logger", "输出数据(游戏内Log)")]
-        public static int LoggerTouch = -1;
-
-        [ConfigEntry("启用数据输出到文件", "设为 true 会把输入流写出至TenoDX_Logs文件夹中")]
+        // ================= UI 与 日志配置 =================
+        [ConfigEntry("启用数据输出到文件", "设为 true 会把输入流与判定写出至文件夹，并在屏幕上方悬挂时钟")]
         public static bool EnableFileLog = false;
 
-        [ConfigEntry("文件日志输出区域", "可填A,B,C或特定传感器A1,B2。用逗号分隔 (修改后需重启生效)")]
-        public static string FileLogTargets = "A";
+        [ConfigEntry("输出日志的区域", "如 A,B,C。若留空则记录所有大区的日志数据")]
+        public static string LogZones = "";
 
-        // ================= 模块状态与文件日志 =================
-        private static readonly bool[] fileLogTargetBlocks = new bool[256];
-        private static readonly HashSet<string> fileLogTargetNames = new HashSet<string>();
+        [ConfigEntry("UI - 时钟字体大小", "默认 300")]
+        public static int ClockFontSize = 300;
+
+        [ConfigEntry("UI - 时钟字体颜色(Hex)", "格式 #RRGGBB，例如 #FFFFFF")]
+        public static string ClockFontColor = "#FFFFFF";
+
+        [ConfigEntry("UI - 时钟描边颜色(Hex)", "格式 #RRGGBB，例如 #0055FF")]
+        public static string ClockOutlineColor = "#1A1A1A";
+
+        [ConfigEntry("UI - 时钟描边宽度", "默认 3，设为 0 则关闭描边")]
+        public static int ClockOutlineWidth = 3;
+
+        // ================= A区 核心判定参数 =================
+        [ConfigEntry("A区 - 基础触发灵敏度", "Trigger Sensitivity: 默认 650")]
+        public static int TriggerSensitivity = 650;
+
+        [ConfigEntry("A区 - 长按防断触能力", "Hold Threshold: 默认 450")]
+        public static int HoldThreshold = 450;
+
+        [ConfigEntry("A区 - 连击极速抬手线", "Quick Release Line: 默认 1200")]
+        public static int QuickReleaseLine = 1200;
+
+        [ConfigEntry("A区 - 悬空防误触拦截(Diff)", "Hover Diff Max: 默认 1000")]
+        public static int HoverDiffMax = 1000;
+
+        [ConfigEntry("A区 - 悬空防误触拦截(diff_deriv)", "Hover Speed Max: 默认 15")]
+        public static int HoverSpeedMax = 15;
+
+        [ConfigEntry("A区 - 极速抽离灵敏度", "Fast Lift Speed: 默认 -250")]
+        public static int FastLiftSpeed = -250;
+
+        // ================= C区 判定参数 =================
+        [ConfigEntry("C区 - Diff 触发线", "默认 25")]
+        public static int BlockC_DiffThreshold = 25;
+
+        [ConfigEntry("C区 - diff_deriv 突变触发线", "默认 25")]
+        public static int BlockC_DerivThreshold = 25;
+
+        [ConfigEntry("C区 - diff_deriv 突变触发抑制线", "默认 -20")]
+        public static int BlockC_DerivRelease = -20;
+
+        [ConfigEntry("C区 - Diff 松开线", "默认 15")]
+        public static int BlockC_DiffRelease = 15;
+
+        // ================= B/D/E区 独立判定参数 =================
+        [ConfigEntry("B区 - Diff 触发线", "默认 8")]
+        public static int BlockB_DiffThreshold = 8;
+        [ConfigEntry("B区 - diff_deriv 突变抑制线", "默认 -15")]
+        public static int BlockB_DerivRelease = -15;
+
+        [ConfigEntry("D区 - Diff 触发线", "默认 3")]
+        public static int BlockD_DiffThreshold = 3;
+        [ConfigEntry("D区 - diff_deriv 突变抑制线", "默认 -4")]
+        public static int BlockD_DerivRelease = -4;
+
+        [ConfigEntry("E区 - Diff 触发线", "默认 15")]
+        public static int BlockE_DiffThreshold = 15;
+        [ConfigEntry("E区 - diff_deriv 突变抑制线", "默认 -16")]
+        public static int BlockE_DerivRelease = -16;
+
+        // ================= 单独通道灵敏度覆盖 (支持跨区填写) =================
+        [ConfigEntry("A区 - Diff 触发线覆盖", "格式如 A1:600, B2:10 (未填写的通道使用默认值)")]
+        public static string Override_A_Diff = "";
+
+        [ConfigEntry("C区 - Diff 触发线覆盖", "支持跨区填写，如 C1:20")]
+        public static string Override_C_Diff = "";
+        [ConfigEntry("C区 - diff_deriv 突变触发线覆盖", "支持跨区填写")]
+        public static string Override_C_DerivTrigger = "";
+        [ConfigEntry("C区 - diff_deriv 突变抑制线覆盖", "支持跨区填写")]
+        public static string Override_C_DerivRelease = "";
+        [ConfigEntry("C区 - Diff 松开线覆盖", "支持跨区填写")]
+        public static string Override_C_DiffRelease = "";
+
+        [ConfigEntry("BDE区 - Diff 触发线覆盖", "支持跨区填写，如 B1:10,D3:12,E4:16")]
+        public static string Override_BDE_Diff = "";
+        [ConfigEntry("BDE区 - diff_deriv 突变抑制线覆盖", "支持跨区填写")]
+        public static string Override_BDE_DerivRelease = "";
+
+        // 通用字符串配置解析器
+        public static Dictionary<string, int> ParseConfigString(string configStr)
+        {
+            var dict = new Dictionary<string, int>();
+            if (string.IsNullOrWhiteSpace(configStr)) return dict;
+
+            string input = configStr.Replace("，", ",");
+            foreach (var pair in input.Split(new[] { ',' }, StringSplitOptions.RemoveEmptyEntries))
+            {
+                var parts = pair.Split(':');
+                if (parts.Length == 2 && int.TryParse(parts[1].Trim(), out int val))
+                {
+                    dict[parts[0].Trim().ToUpper()] = val;
+                }
+            }
+            return dict;
+        }
 
         private static string logDirectory;
         private static int logFilePart = 1;
@@ -108,22 +134,88 @@ namespace AquaMai.Mods.GameSystem
         private static readonly long MAX_LOG_SIZE = 4096 * 1024; // 2 MB
         private static readonly object fileLock = new object();
 
-        // ===== 时间显示挂载器 =====
+        // ================= 生命周期注入核心 =================
+        public static void OnBeforeEnableCheck()
+        {
+            MelonLogger.Msg("[TenoDXIO] 正在注册 1P 触摸触发器 (逻辑模块已解耦分离)...");
+            TouchStateProcessor.Init();
+            TouchStatusProvider.RegisterTouchStatusProvider(0, TouchStateProcessor.ProvideTouchStatus);
+            SerialThreadManager.Start();
+        }
+
         public class TenoTimeDisplay : MonoBehaviour
         {
             private GUIStyle style;
+            private GUIStyle outlineStyle;
+            private string lastFontColor = "";
+            private string lastOutlineColor = "";
+            private int lastFontSize = -1;
+
+            // 缓存当前时间字符串，避免在 OnGUI 中高频引发 GC
+            private string currentTimeText = "";
+
+            void Update()
+            {
+                // Update 严格跟随引擎每帧执行一次
+                // 在这里处理字符串分配，彻底消除时间刷新带来的 GC 卡顿
+                currentTimeText = DateTime.Now.ToString("HH:mm:ss.fff");
+            }
+
             void OnGUI()
             {
-                if (style == null)
+                // 核心性能优化：屏蔽 Layout 及各类输入事件
+                // 只有在真正的屏幕重绘 (Repaint) 阶段才执行渲染逻辑
+                if (Event.current.type != EventType.Repaint) return;
+
+                if (style == null || lastFontSize != ClockFontSize || lastFontColor != ClockFontColor || lastOutlineColor != ClockOutlineColor)
                 {
                     style = new GUIStyle();
-                    style.fontSize = 180;
-                    style.normal.textColor = Color.black;
+                    style.fontSize = ClockFontSize;
                     style.alignment = TextAnchor.UpperCenter;
                     style.fontStyle = FontStyle.Bold;
+
+                    outlineStyle = new GUIStyle();
+                    outlineStyle.fontSize = ClockFontSize;
+                    outlineStyle.alignment = TextAnchor.UpperCenter;
+                    outlineStyle.fontStyle = FontStyle.Bold;
+
+                    Color mainColor = Color.white;
+                    Color outColor = Color.black;
+
+                    if (!ColorUtility.TryParseHtmlString(ClockFontColor, out mainColor))
+                        MelonLogger.Warning($"[TenoDXIO] 无法解析字体颜色: {ClockFontColor}");
+                    if (!ColorUtility.TryParseHtmlString(ClockOutlineColor, out outColor))
+                        MelonLogger.Warning($"[TenoDXIO] 无法解析描边颜色: {ClockOutlineColor}");
+
+                    style.normal.textColor = mainColor;
+                    outlineStyle.normal.textColor = outColor;
+
+                    lastFontSize = ClockFontSize;
+                    lastFontColor = ClockFontColor;
+                    lastOutlineColor = ClockOutlineColor;
                 }
+
                 GUI.depth = -1000;
-                GUI.Label(new Rect(0, 10, Screen.width, 50), DateTime.Now.ToString("HH:mm:ss.fff"), style);
+                Rect rect = new Rect(0, 10, Screen.width, 50);
+                int w = ClockOutlineWidth;
+
+                if (w > 0)
+                {
+                    // 升级为八向描边，彻底压住亮橙色背景的高光干扰
+                    // 左右上下
+                    GUI.Label(new Rect(rect.x - w, rect.y, rect.width, rect.height), currentTimeText, outlineStyle);
+                    GUI.Label(new Rect(rect.x + w, rect.y, rect.width, rect.height), currentTimeText, outlineStyle);
+                    GUI.Label(new Rect(rect.x, rect.y - w, rect.width, rect.height), currentTimeText, outlineStyle);
+                    GUI.Label(new Rect(rect.x, rect.y + w, rect.width, rect.height), currentTimeText, outlineStyle);
+                    // 四个对角线
+                    GUI.Label(new Rect(rect.x - w, rect.y - w, rect.width, rect.height), currentTimeText, outlineStyle);
+                    GUI.Label(new Rect(rect.x + w, rect.y + w, rect.width, rect.height), currentTimeText, outlineStyle);
+                    GUI.Label(new Rect(rect.x - w, rect.y + w, rect.width, rect.height), currentTimeText, outlineStyle);
+                    GUI.Label(new Rect(rect.x + w, rect.y - w, rect.width, rect.height), currentTimeText, outlineStyle);
+                }
+
+                // 绘制主文字
+                GUI.Label(rect, currentTimeText, style);
             }
         }
 
@@ -138,53 +230,7 @@ namespace AquaMai.Mods.GameSystem
             }
         }
 
-        public static void OnBeforeEnableCheck()
-        {
-            MelonLogger.Msg("[TenoDXIO] 正在注册 1P 触摸触发器 (逻辑模块已解耦分离)...");
-
-            ParseConfigs();
-            InitFileLogger();
-
-            TouchStateProcessor.Init();
-            TouchStatusProvider.RegisterTouchStatusProvider(0, TouchStateProcessor.ProvideTouchStatus);
-
-            SerialThreadManager.Start();
-        }
-
-        private static void ParseConfigs()
-        {
-            fileLogTargetNames.Clear();
-            Array.Clear(fileLogTargetBlocks, 0, fileLogTargetBlocks.Length);
-
-            if (!string.IsNullOrEmpty(FileLogTargets))
-            {
-                foreach (var t in FileLogTargets.Split([','], StringSplitOptions.RemoveEmptyEntries))
-                {
-                    string target = t.Trim();
-                    if (target.Length == 1) fileLogTargetBlocks[target[0]] = true;
-                    else fileLogTargetNames.Add(target);
-                }
-            }
-        }
-
-        public static Dictionary<string, int> ParseOverrideString(string input)
-        {
-            var dict = new Dictionary<string, int>();
-            if (string.IsNullOrWhiteSpace(input)) return dict;
-
-            input = input.Replace("，", ",");
-            foreach (var pair in input.Split([','], StringSplitOptions.RemoveEmptyEntries))
-            {
-                var parts = pair.Split(':');
-                if (parts.Length == 2 && int.TryParse(parts[1].Trim(), out int val))
-                {
-                    dict[parts[0].Trim()] = val;
-                }
-            }
-            return dict;
-        }
-
-        private static void InitFileLogger()
+        public static void InitFileLogger()
         {
             if (!EnableFileLog) return;
             try
@@ -210,23 +256,20 @@ namespace AquaMai.Mods.GameSystem
                     logWriter.Close();
                 }
                 string path = Path.Combine(logDirectory, $"data_part{logFilePart}.txt");
-                logWriter = new StreamWriter(path, true, System.Text.Encoding.UTF8)
-                {
-                    AutoFlush = true
-                };
+                logWriter = new StreamWriter(path, true, System.Text.Encoding.UTF8) { AutoFlush = true };
                 currentLogSize = 0;
                 logFilePart++;
             }
         }
 
-        public static void WriteToFileLog(string name, int raw, float baseline, int threshold, int variance, string subStateStr, int status)
+        public static void WriteLog(int physicalChannel, char block, string logicalName, int raw, int setupRaw, int diff, int diff_deriv, bool isPressed)
         {
             if (!EnableFileLog || logWriter == null) return;
 
-            // 零GC过滤
-            if (!fileLogTargetBlocks[name[0]] && !fileLogTargetNames.Contains(name)) return;
+            if (!string.IsNullOrWhiteSpace(LogZones) && !LogZones.Contains(block.ToString())) return;
 
-            string line = $"[{DateTime.Now:HH:mm:ss.fff}] [{name}] Raw:{raw} Base:{baseline:F1} Thresh:{threshold} Var:{variance} Sub:{subStateStr} Stat:{status}";
+            int status = isPressed ? 1 : 0;
+            string line = $"[{DateTime.Now:HH:mm:ss.fff}] [Ch:{physicalChannel:D2}] [Block:{block}] [{logicalName}] Raw:{raw} Base:{setupRaw} Diff:{diff} Deriv:{diff_deriv} Stat:{status}";
 
             lock (fileLock)
             {
@@ -234,11 +277,7 @@ namespace AquaMai.Mods.GameSystem
                 {
                     logWriter.WriteLine(line);
                     currentLogSize += line.Length + 2;
-
-                    if (currentLogSize >= MAX_LOG_SIZE)
-                    {
-                        OpenNewLogFile();
-                    }
+                    if (currentLogSize >= MAX_LOG_SIZE) OpenNewLogFile();
                 }
                 catch { }
             }
