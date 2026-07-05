@@ -9,12 +9,7 @@ namespace AquaMai.Mods.GameSystem
         private static ulong currentTouchMask = 0;
         private static readonly object dataLock = new object();
 
-        // [核心重构]: 硬编码通道映射字典 0-33 顺序
-        private static readonly string[] PhysicalToLogicalMap = new string[34] {
-            "A5", "E5", "D5", "B4", "A4", "E4", "D4", "B3", "A3", "C1", "E3", "D3", "B2", "A2", "E2", "D2", "B1", // 0-16
-            "A1", "E1", "D1", "B8", "A8", "E8", "D8", "B7", "A7", "C2", "E7", "D7", "B6", "A6", "E6", "D6", "B5"  // 17-33
-        };
-
+        // 逻辑掩码存储
         private static ulong[] logicalToMaskMap = new ulong[34];
 
         // 分别缓存各类重载参数，-1 代表使用默认值
@@ -33,13 +28,19 @@ namespace AquaMai.Mods.GameSystem
         private static int[] setupRaw = new int[34];
         private static int startupPacketsCount = 0;
         private static bool startupRawReady = false;
-        private const int SKIP_FRAMES = 50;
+        private const int SKIP_FRAMES = 200;
         private const int STARTUP_FRAMES = 30;
         private static int skipPacketsCount = 0;
 
         public static void Init()
         {
             TenoDXIO.InitFileLogger();
+
+            // ===============================================
+            // 【核心注入】：读取并应用 MelonLoader 配置文件中的映射表
+            // ===============================================
+            TenoDXIO.ApplyHardwareMapping();
+
             InitMappings();
             LoadOverrides();
             for (int i = 0; i < 34; i++) detectors[i] = new ButtonDetector();
@@ -49,7 +50,8 @@ namespace AquaMai.Mods.GameSystem
         {
             for (int i = 0; i < 34; i++)
             {
-                string logical = PhysicalToLogicalMap[i];
+                // 改由核心全局配置文件获取映射
+                string logical = HardwareConfig.PhysicalToLogicalMap[i];
                 int maskShift = 0;
                 char block = logical[0];
                 int num = logical[1] - '1';
@@ -68,7 +70,6 @@ namespace AquaMai.Mods.GameSystem
 
         private static void LoadOverrides()
         {
-            // 解析所有文本框字符串
             var dict_A = TenoDXIO.ParseConfigString(TenoDXIO.Override_A_Diff);
             var dict_C_diff = TenoDXIO.ParseConfigString(TenoDXIO.Override_C_Diff);
             var dict_C_deriv_t = TenoDXIO.ParseConfigString(TenoDXIO.Override_C_DerivTrigger);
@@ -77,10 +78,9 @@ namespace AquaMai.Mods.GameSystem
             var dict_BDE_diff = TenoDXIO.ParseConfigString(TenoDXIO.Override_BDE_Diff);
             var dict_BDE_deriv_r = TenoDXIO.ParseConfigString(TenoDXIO.Override_BDE_DerivRelease);
 
-            // 分配缓存至数组，用于每帧的 O(1) 性能调用
             for (int i = 0; i < 34; i++)
             {
-                string logical = PhysicalToLogicalMap[i];
+                string logical = HardwareConfig.PhysicalToLogicalMap[i];
                 override_A[i] = dict_A.ContainsKey(logical) ? dict_A[logical] : -1;
                 override_C_Diff[i] = dict_C_diff.ContainsKey(logical) ? dict_C_diff[logical] : -1;
                 override_C_DerivT[i] = dict_C_deriv_t.ContainsKey(logical) ? dict_C_deriv_t[logical] : -1;
@@ -91,14 +91,13 @@ namespace AquaMai.Mods.GameSystem
             }
         }
 
-        // [核心重构]: 提取区块及数字信息的独立函数
         public static (char block, int number) GetZoneInfo(int physicalChannel)
         {
-            string logical = PhysicalToLogicalMap[physicalChannel];
+            string logical = HardwareConfig.PhysicalToLogicalMap[physicalChannel];
             return (logical[0], logical[1] - '0');
         }
 
-        public static string GetLogicalName(int physicalChannel) => PhysicalToLogicalMap[physicalChannel];
+        public static string GetLogicalName(int physicalChannel) => HardwareConfig.PhysicalToLogicalMap[physicalChannel];
 
         public static void ResetCalibration()
         {
@@ -204,12 +203,10 @@ namespace AquaMai.Mods.GameSystem
                 int diff_deriv_2 = current_val - GetHistory(1);
                 int diff_deriv_3 = current_val - GetHistory(2);
 
-                // 默认状态必须是 false
                 bool on = false;
 
                 if (block == 'A') // === 组 0 ===
                 {
-                    // A 区的复杂逻辑依赖上一帧的状态，显式继承
                     on = is_pressed;
 
                     int customDiff = override_A[physicalChannel];
@@ -233,8 +230,6 @@ namespace AquaMai.Mods.GameSystem
 
                     if (diff < 200) lock_releasing = false;
 
-                    // 【修复 Miss 核心 1】：强行击穿 ITO 的波形死锁。
-                    // 只要 Diff 足够高（稳稳按死，超过触发阈值的 1.5 倍），无视任何导数条件，强行砸碎松开锁！
                     if ((lock_releasing && diff_deriv > 150 && diff > on_diff) || diff > on_diff * 1.5)
                     {
                         lock_releasing = false;
@@ -296,7 +291,6 @@ namespace AquaMai.Mods.GameSystem
 
                     if (diff > c_diff || diff_deriv > c_deriv_t)
                     {
-                        // 【修复 Miss 核心 2】：防止 C 区长按时被波形下跌误触发断触
                         if (diff_deriv < c_deriv_r && diff < c_diff * 1.5)
                         {
                             on = false;
@@ -337,33 +331,27 @@ namespace AquaMai.Mods.GameSystem
 
                     int last_diff = GetHistory(0) - setup_raw;
 
-                    // 【修复 Late 核心】：0延迟自适应触发 + 波形保持
-                    // 1. 如果信号极强(越过1.5倍阈值)，立刻触发，彻底消灭 Late。
                     if (diff > bde_diff * 1.5)
                     {
                         on = true;
                     }
-                    // 2. 如果信号刚刚过阈值，看上一帧是否在上升期（过滤单帧瞬间脉冲）
                     else if (diff > bde_diff && last_diff > bde_diff / 2)
                     {
                         on = true;
                     }
-                    // 3. 如果原本就在按下状态，并且值还在阈值上，维持按下（抗断触）
                     else if (is_pressed && diff > bde_diff)
                     {
                         on = true;
                     }
 
-                    // 释放逻辑：波形下跌不能盲目释放，只有 Diff 掉落到相对危险区才信导数
                     if (diff_deriv < bde_deriv_r)
                     {
-                        if (diff < bde_diff * 1.5) // 防止长按期间的高位波形起伏引发断触
+                        if (diff < bde_diff * 1.5)
                         {
                             on = false;
                         }
                     }
 
-                    // 绝对兜底释放
                     if (diff <= bde_diff / 2)
                     {
                         on = false;

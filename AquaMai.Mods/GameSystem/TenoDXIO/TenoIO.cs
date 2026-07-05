@@ -11,6 +11,51 @@ using Main;
 
 namespace AquaMai.Mods.GameSystem
 {
+    // ==========================================
+    // 全局统一硬件扫描参数表 (独立硬编码，不参与游戏内配置系统)
+    // ==========================================
+    public static class HardwareConfig
+    {
+        public class ScanParams
+        {
+            public int Res;
+            public int Mod;
+            public int Sns;
+            public int Div;
+            public char DetGroup;
+        }
+
+        // 预留的硬件参数配置
+        public static readonly ScanParams ParamsA = new ScanParams { Res = 12, Mod = 15, Sns = 2, Div = 2, DetGroup = 'A' };
+        public static readonly ScanParams ParamsB = new ScanParams { Res = 10, Mod = 25, Sns = 4, Div = 4, DetGroup = 'B' };
+        public static readonly ScanParams ParamsC = new ScanParams { Res = 12, Mod = 30, Sns = 4, Div = 4, DetGroup = 'C' };
+        public static readonly ScanParams ParamsD = new ScanParams { Res = 8, Mod = 10, Sns = 2, Div = 2, DetGroup = 'D' };
+        public static readonly ScanParams ParamsE = new ScanParams { Res = 8, Mod = 8, Sns = 2, Div = 2, DetGroup = 'E' };
+
+        // 物理通道映射表数组，去除了 readonly 以支持被配置文件覆盖。
+        // 这里的默认值就是你给出的正确顺序，防止配置文件未生成或被清空时发生越界崩溃。
+        public static string[] PhysicalToLogicalMap = new string[34] {
+            "A5", "E5", "D5", "B4", "A4", "E4", "D4", "B3", "A3", "C1", "E3", "D3", "B2", "A2", "E2", "D2", "B1", // 0-16
+            "A1", "E1", "D1", "B8", "A8", "E8", "D8", "B7", "A7", "C2", "E7", "D7", "B6", "A6", "E6", "D6", "B5"  // 17-33
+        };
+
+        public static ScanParams GetParams(char block)
+        {
+            switch (block)
+            {
+                case 'A': return ParamsA;
+                case 'B': return ParamsB;
+                case 'C': return ParamsC;
+                case 'D': return ParamsD;
+                case 'E': return ParamsE;
+                default: return ParamsA;
+            }
+        }
+    }
+
+    // ==========================================
+    // 动态配置系统 (游戏内可调的算法参数与映射)
+    // ==========================================
     [ConfigSection(
       name: "TenoDXIO Touch Trigger",
       en: "TenoDXIO Touch Trigger",
@@ -23,6 +68,10 @@ namespace AquaMai.Mods.GameSystem
 
         [ConfigEntry("IIR滤波器系数", "可选值: 1(关闭滤波), 2(即1/2), 4(即1/4), 8(即1/8), 16(即1/16)")]
         public static int IIRFilterFactor = 1;
+
+        // ================= 硬件引脚映射配置 =================
+        [ConfigEntry("硬件引脚通道映射", "按0-33的物理通道顺序，填入对应的游戏区块，用逗号分隔")]
+        public static string HardwareMapping = "A5,E5,D5,B4,A4,E4,D4,B3,A3,C1,E3,D3,B2,A2,E2,D2,B1,A1,E1,D1,B8,A8,E8,D8,B7,A7,C2,E7,D7,B6,A6,E6,D6,B5";
 
         // ================= UI 与 日志配置 =================
         [ConfigEntry("启用数据输出到文件", "设为 true 会把输入流与判定写出至文件夹，并在屏幕上方悬挂时钟")]
@@ -109,7 +158,20 @@ namespace AquaMai.Mods.GameSystem
         [ConfigEntry("BDE区 - diff_deriv 突变抑制线覆盖", "支持跨区填写")]
         public static string Override_BDE_DerivRelease = "";
 
-        // 通用字符串配置解析器
+        // 解析映射表配置，将其覆写到底层逻辑数组中
+        public static void ApplyHardwareMapping()
+        {
+            if (string.IsNullOrWhiteSpace(HardwareMapping)) return;
+            // 兼容中英文逗号
+            string[] rawMaps = HardwareMapping.Replace("，", ",").Split(new[] { ',' }, StringSplitOptions.RemoveEmptyEntries);
+
+            // 安全注入，防止数组越界
+            for (int i = 0; i < 34 && i < rawMaps.Length; i++)
+            {
+                HardwareConfig.PhysicalToLogicalMap[i] = rawMaps[i].Trim().ToUpper();
+            }
+        }
+
         public static Dictionary<string, int> ParseConfigString(string configStr)
         {
             var dict = new Dictionary<string, int>();
@@ -151,20 +213,15 @@ namespace AquaMai.Mods.GameSystem
             private string lastOutlineColor = "";
             private int lastFontSize = -1;
 
-            // 缓存当前时间字符串，避免在 OnGUI 中高频引发 GC
             private string currentTimeText = "";
 
             void Update()
             {
-                // Update 严格跟随引擎每帧执行一次
-                // 在这里处理字符串分配，彻底消除时间刷新带来的 GC 卡顿
                 currentTimeText = DateTime.Now.ToString("HH:mm:ss.fff");
             }
 
             void OnGUI()
             {
-                // 核心性能优化：屏蔽 Layout 及各类输入事件
-                // 只有在真正的屏幕重绘 (Repaint) 阶段才执行渲染逻辑
                 if (Event.current.type != EventType.Repaint) return;
 
                 if (style == null || lastFontSize != ClockFontSize || lastFontColor != ClockFontColor || lastOutlineColor != ClockOutlineColor)
@@ -201,20 +258,16 @@ namespace AquaMai.Mods.GameSystem
 
                 if (w > 0)
                 {
-                    // 升级为八向描边，彻底压住亮橙色背景的高光干扰
-                    // 左右上下
                     GUI.Label(new Rect(rect.x - w, rect.y, rect.width, rect.height), currentTimeText, outlineStyle);
                     GUI.Label(new Rect(rect.x + w, rect.y, rect.width, rect.height), currentTimeText, outlineStyle);
                     GUI.Label(new Rect(rect.x, rect.y - w, rect.width, rect.height), currentTimeText, outlineStyle);
                     GUI.Label(new Rect(rect.x, rect.y + w, rect.width, rect.height), currentTimeText, outlineStyle);
-                    // 四个对角线
                     GUI.Label(new Rect(rect.x - w, rect.y - w, rect.width, rect.height), currentTimeText, outlineStyle);
                     GUI.Label(new Rect(rect.x + w, rect.y + w, rect.width, rect.height), currentTimeText, outlineStyle);
                     GUI.Label(new Rect(rect.x - w, rect.y + w, rect.width, rect.height), currentTimeText, outlineStyle);
                     GUI.Label(new Rect(rect.x + w, rect.y - w, rect.width, rect.height), currentTimeText, outlineStyle);
                 }
 
-                // 绘制主文字
                 GUI.Label(rect, currentTimeText, style);
             }
         }
