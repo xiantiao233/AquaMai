@@ -25,20 +25,55 @@ namespace AquaMai.Mods.GameSystem
             public char DetGroup;
         }
 
-        // 预留的硬件参数配置
-        public static readonly ScanParams ParamsA = new ScanParams { Res = 12, Mod = 15, Sns = 2, Div = 2, DetGroup = 'A' };
-        public static readonly ScanParams ParamsB = new ScanParams { Res = 10, Mod = 25, Sns = 4, Div = 4, DetGroup = 'B' };
-        public static readonly ScanParams ParamsC = new ScanParams { Res = 12, Mod = 30, Sns = 4, Div = 4, DetGroup = 'C' };
-        public static readonly ScanParams ParamsD = new ScanParams { Res = 8, Mod = 10, Sns = 2, Div = 2, DetGroup = 'D' };
-        public static readonly ScanParams ParamsE = new ScanParams { Res = 8, Mod = 8, Sns = 2, Div = 2, DetGroup = 'E' };
+        // ================= 动态解析与懒加载配置 =================
+        private static ScanParams _paramsA;
+        public static ScanParams ParamsA => _paramsA ?? (_paramsA = ParseScanParams(TenoDXIO.ScanConfig_A, 12, 15, 2, 2, 'A'));
 
-        // 物理通道映射表数组，去除了 readonly 以支持被配置文件覆盖。
-        // 这里的默认值就是你给出的正确顺序，防止配置文件未生成或被清空时发生越界崩溃。
+        private static ScanParams _paramsB;
+        public static ScanParams ParamsB => _paramsB ?? (_paramsB = ParseScanParams(TenoDXIO.ScanConfig_B, 10, 25, 4, 4, 'B'));
+
+        private static ScanParams _paramsC;
+        public static ScanParams ParamsC => _paramsC ?? (_paramsC = ParseScanParams(TenoDXIO.ScanConfig_C, 12, 30, 4, 4, 'C'));
+
+        private static ScanParams _paramsD;
+        public static ScanParams ParamsD => _paramsD ?? (_paramsD = ParseScanParams(TenoDXIO.ScanConfig_D, 8, 10, 2, 2, 'D'));
+
+        private static ScanParams _paramsE;
+        public static ScanParams ParamsE => _paramsE ?? (_paramsE = ParseScanParams(TenoDXIO.ScanConfig_E, 8, 8, 2, 2, 'E'));
+
+        // 安全解析方法：解析失败时自动回退至默认值
+        private static ScanParams ParseScanParams(string configStr, int defRes, int defMod, int defSns, int defDiv, char defGroup)
+        {
+            var p = new ScanParams { Res = defRes, Mod = defMod, Sns = defSns, Div = defDiv, DetGroup = defGroup };
+            if (string.IsNullOrWhiteSpace(configStr)) return p;
+
+            try
+            {
+                // 兼容中英文逗号
+                string[] parts = configStr.Replace("，", ",").Split([','], StringSplitOptions.RemoveEmptyEntries);
+                if (parts.Length >= 5)
+                {
+                    p.Res = int.Parse(parts[0].Trim());
+                    p.Mod = int.Parse(parts[1].Trim());
+                    p.Sns = int.Parse(parts[2].Trim());
+                    p.Div = int.Parse(parts[3].Trim());
+                    p.DetGroup = parts[4].Trim().ToUpper()[0];
+                }
+            }
+            catch (Exception e)
+            {
+                MelonLogger.Warning($"[TenoDXIO] 硬件扫描参数解析失败: {configStr}，将使用默认值。错误: {e.Message}");
+            }
+            return p;
+        }
+
+        // 物理通道映射表数组保持不变...
         public static string[] PhysicalToLogicalMap = new string[34] {
-            "A5", "E5", "D5", "B4", "A4", "E4", "D4", "B3", "A3", "C1", "E3", "D3", "B2", "A2", "E2", "D2", "B1", // 0-16
-            "A1", "E1", "D1", "B8", "A8", "E8", "D8", "B7", "A7", "C2", "E7", "D7", "B6", "A6", "E6", "D6", "B5"  // 17-33
+            "A5", "E5", "D5", "B4", "A4", "E4", "D4", "B3", "A3", "C1", "E3", "D3", "B2", "A2", "E2", "D2", "B1",
+            "A1", "E1", "D1", "B8", "A8", "E8", "D8", "B7", "A7", "C2", "E7", "D7", "B6", "A6", "E6", "D6", "B5"
         };
 
+        // GetParams 逻辑无需修改
         public static ScanParams GetParams(char block)
         {
             switch (block)
@@ -72,6 +107,22 @@ namespace AquaMai.Mods.GameSystem
         // ================= 硬件引脚映射配置 =================
         [ConfigEntry("硬件引脚通道映射", "按0-33的物理通道顺序，填入对应的游戏区块，用逗号分隔")]
         public static string HardwareMapping = "A5,E5,D5,B4,A4,E4,D4,B3,A3,C1,E3,D3,B2,A2,E2,D2,B1,A1,E1,D1,B8,A8,E8,D8,B7,A7,C2,E7,D7,B6,A6,E6,D6,B5";
+
+        // ================= 硬件扫描参数配置 =================
+        [ConfigEntry("硬件扫描参数 - A区", "格式: Res,Mod,Sns,Div,DetGroup (默认: 12,15,2,2,A)")]
+        public static string ScanConfig_A = "12,15,2,2,A";
+
+        [ConfigEntry("硬件扫描参数 - B区", "格式: Res,Mod,Sns,Div,DetGroup (默认: 10,25,4,4,B)")]
+        public static string ScanConfig_B = "10,25,4,4,B";
+
+        [ConfigEntry("硬件扫描参数 - C区", "格式: Res,Mod,Sns,Div,DetGroup (默认: 12,30,4,4,C)")]
+        public static string ScanConfig_C = "12,30,4,4,C";
+
+        [ConfigEntry("硬件扫描参数 - D区", "格式: Res,Mod,Sns,Div,DetGroup (默认: 8,10,2,2,D)")]
+        public static string ScanConfig_D = "8,10,2,2,D";
+
+        [ConfigEntry("硬件扫描参数 - E区", "格式: Res,Mod,Sns,Div,DetGroup (默认: 8,8,2,2,E)")]
+        public static string ScanConfig_E = "8,8,2,2,E";
 
         // ================= UI 与 日志配置 =================
         [ConfigEntry("启用数据输出到文件", "设为 true 会把输入流与判定写出至文件夹，并在屏幕上方悬挂时钟")]
