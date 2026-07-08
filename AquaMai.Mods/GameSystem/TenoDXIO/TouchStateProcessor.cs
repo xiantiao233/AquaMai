@@ -9,6 +9,12 @@ namespace AquaMai.Mods.GameSystem
         private static ulong currentTouchMask = 0;
         private static readonly object dataLock = new object();
 
+
+        // ======= 新增以下三个变量 =======
+        private static ulong latchedTouchMask = 0; // 用于记录瞬时按下的锁存掩码
+        private static ulong lastReadResult = 0;   // 缓存上一次给游戏返回的结果
+        private static DateTime lastReadTime = DateTime.MinValue; // 防止同一帧多次读取导致锁存失效
+
         // 逻辑掩码存储
         private static ulong[] logicalToMaskMap = new ulong[34];
 
@@ -142,9 +148,11 @@ namespace AquaMai.Mods.GameSystem
                 }
             }
 
+            // ======= 改为如下代码 =======
             lock (dataLock)
             {
-                currentTouchMask = newTouchMask;
+                currentTouchMask = newTouchMask; // 依然记录当前的物理真实状态
+                latchedTouchMask |= newTouchMask; // 按位或：只要在此期间触发过，就把这一位锁死为 1
             }
         }
 
@@ -152,7 +160,21 @@ namespace AquaMai.Mods.GameSystem
         {
             lock (dataLock)
             {
-                return currentTouchMask;
+                // 防抖：如果游戏在 2 毫秒内多次请求读取（说明是同一帧内的重复读取）
+                // 直接返回缓存的结果，不重置锁存器
+                if ((DateTime.Now - lastReadTime).TotalMilliseconds < 2.0)
+                {
+                    return lastReadResult;
+                }
+
+                // 最终结果 = 自上次读取后瞬间按下的键 (latched) + 当前手指还真实按在上面的键 (current)
+                lastReadResult = latchedTouchMask | currentTouchMask;
+
+                // 【核心】游戏读取完毕后，将锁存器重置为当前的物理真实状态
+                latchedTouchMask = currentTouchMask;
+                lastReadTime = DateTime.Now;
+
+                return lastReadResult;
             }
         }
 
@@ -215,16 +237,17 @@ namespace AquaMai.Mods.GameSystem
                     if (diff > on_default_diff + 400 || diff < on_default_diff - 400) up = 0;
 
                     int on_diff = on_default_diff;
+
+                    int last_diff = GetHistory(0) - setup_raw;
+                    if (last_diff < on_default_diff && diff >= on_default_diff) up = 1;
+                    else if (last_diff >= on_default_diff && diff < on_default_diff) up = -1;
+
                     switch (up)
                     {
                         case 0: on_diff = on_default_diff; break;
                         case 1: on_diff = TenoDXIO.HoldThreshold; break;
                         case -1: on_diff = 800; break;
                     }
-
-                    int last_diff = GetHistory(0) - setup_raw;
-                    if (last_diff < on_default_diff && diff >= on_default_diff) up = 1;
-                    else if (last_diff >= on_default_diff && diff < on_default_diff) up = -1;
 
                     int absolute_safe_diff = TenoDXIO.QuickReleaseLine;
 

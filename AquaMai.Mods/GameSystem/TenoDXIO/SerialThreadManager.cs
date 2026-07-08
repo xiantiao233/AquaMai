@@ -1,5 +1,4 @@
 using System;
-using System.Collections.Generic;
 using System.IO.Ports;
 using System.Threading;
 using MelonLoader;
@@ -12,11 +11,21 @@ namespace AquaMai.Mods.GameSystem
         private static Thread serialThread;
         private static SerialPort serialPort;
 
-        // ================= 滤波器状态 =================
-        private static float[] filterHistory = new float[34];
-        private static bool isFirstFrame = true;
+        // ================= 性能优化预分配 =================
+        // 1. 复用通道数组，避免每帧 new ushort[34] 触发 GC 卡顿
+        private static readonly ushort[] channelsCache = new ushort[34];
 
-        // 新增：配置下发防抖时间戳
+        // 2. 使用滑动窗口数组替换效率低下的 List<byte>
+        private static readonly byte[] streamBuffer = new byte[8192];
+        private static int bufferLength = 0;
+
+        // ================= 滤波器状态 =================
+        private static readonly float[] filterHistory = new float[34];
+        private static bool isFirstFrame = true;
+        // 新增：舍弃前100帧不稳定数据，解决 IIR 冷启动问题
+        private static int warmupFrames = 100;
+
+        // 配置下发防抖时间戳
         private static DateTime lastConfigSendTime = DateTime.MinValue;
 
         public static void Start()
@@ -42,20 +51,15 @@ namespace AquaMai.Mods.GameSystem
             }
         }
 
-        // ==========================================
-        // 新增：向主控板下发 34 通道硬件配置
-        // ==========================================
         private static void SendHardwareConfig()
         {
-            // 防抖机制：1秒内最多下发1次，防止被 STM32 60Hz的请求包撑爆串口
             if ((DateTime.Now - lastConfigSendTime).TotalSeconds < 1.0) return;
             lastConfigSendTime = DateTime.Now;
 
             byte[] frame = new byte[139];
-            frame[0] = 0xAA; // 帧头
-            frame[1] = 0x01; // 配置指令码
+            frame[0] = 0xAA;
+            frame[1] = 0x01;
 
-            // 动态读取我们写在 TenoDXIO.cs 顶部的全局配置硬编码参数
             for (int i = 0; i < 34; i++)
             {
                 string logical = HardwareConfig.PhysicalToLogicalMap[i];
@@ -88,26 +92,25 @@ namespace AquaMai.Mods.GameSystem
 
         private static void SerialReaderThread()
         {
-            List<byte> buffer = new List<byte>();
-            byte[] readBuf = new byte[4096];
-
             while (isRunning)
             {
                 if (serialPort == null || !serialPort.IsOpen)
                 {
                     try
                     {
-                        // 波特率硬编码为 115200
-                        serialPort = new SerialPort(TenoDXIO.COMPort, 115200);
-                        serialPort.ReadTimeout = 100;
+                        serialPort = new SerialPort(TenoDXIO.COMPort, 115200)
+                        {
+                            ReadTimeout = 100
+                        };
                         serialPort.Open();
                         MelonLogger.Msg($"[TenoDXIO] 成功连接输入串口: {TenoDXIO.COMPort} @ 115200 bps");
 
+                        // 状态重置
                         isFirstFrame = true;
-                        TouchStateProcessor.ResetCalibration();
+                        warmupFrames = 100; // 重新连接时，再次预热 100 帧
+                        bufferLength = 0;   // 清空脏数据缓冲区
 
-                        // 连接断开后缓冲区会有脏数据，重连时强制清空
-                        buffer.Clear();
+                        TouchStateProcessor.ResetCalibration();
                     }
                     catch (Exception)
                     {
@@ -120,65 +123,87 @@ namespace AquaMai.Mods.GameSystem
                 {
                     if (serialPort.BytesToRead > 0)
                     {
-                        int bytesRead = serialPort.Read(readBuf, 0, readBuf.Length);
-                        for (int i = 0; i < bytesRead; i++) buffer.Add(readBuf[i]);
+                        // 1. 直接读入滑动窗口尾部，避免中转数组
+                        int bytesRead = serialPort.Read(streamBuffer, bufferLength, streamBuffer.Length - bufferLength);
+                        bufferLength += bytesRead;
 
-                        while (buffer.Count >= 70)
+                        int processIndex = 0;
+
+                        // 2. 寻找有效数据包
+                        while (bufferLength - processIndex >= 70)
                         {
-                            // 【核心修复】：必须先校验 Checksum，再根据状态字分支处理！
-                            // 千万不要一上来就强制判断 buffer[0] == 0x00
                             int checksum = 0;
-                            for (int i = 0; i < 69; i++) checksum += buffer[i];
-
-                            if ((checksum & 0xFF) == buffer[69])
+                            for (int i = 0; i < 69; i++)
                             {
-                                byte status = buffer[0];
+                                checksum += streamBuffer[processIndex + i];
+                            }
+
+                            // 校验通过
+                            if ((checksum & 0xFF) == streamBuffer[processIndex + 69])
+                            {
+                                byte status = streamBuffer[processIndex + 0];
 
                                 if (status == 0x00) // 正常扫描数据
                                 {
-                                    ushort[] channels = new ushort[34];
-                                    for (int i = 0; i < 34; i++)
+                                    // 预热期判定：抛弃前 100 帧极端不稳定的通电电容数据
+                                    if (warmupFrames > 0)
                                     {
-                                        ushort raw = (ushort)(buffer[1 + i * 2] | (buffer[2 + i * 2] << 8));
-
-                                        // IIR 滤波逻辑
-                                        if (TenoDXIO.IIRFilterFactor > 1)
-                                        {
-                                            if (isFirstFrame) filterHistory[i] = raw;
-                                            else filterHistory[i] += (raw - filterHistory[i]) / (float)TenoDXIO.IIRFilterFactor;
-
-                                            channels[i] = (ushort)Math.Round(filterHistory[i]);
-                                        }
-                                        else
-                                        {
-                                            channels[i] = raw;
-                                        }
+                                        warmupFrames--;
                                     }
+                                    else
+                                    {
+                                        for (int i = 0; i < 34; i++)
+                                        {
+                                            ushort raw = (ushort)(streamBuffer[processIndex + 1 + i * 2] | (streamBuffer[processIndex + 2 + i * 2] << 8));
 
-                                    if (isFirstFrame && TenoDXIO.IIRFilterFactor > 1) isFirstFrame = false;
+                                            if (TenoDXIO.IIRFilterFactor > 1)
+                                            {
+                                                if (isFirstFrame) filterHistory[i] = raw;
+                                                else filterHistory[i] += (raw - filterHistory[i]) / (float)TenoDXIO.IIRFilterFactor;
 
-                                    TouchStateProcessor.ProcessFrame(channels);
+                                                channelsCache[i] = (ushort)Math.Round(filterHistory[i]);
+                                            }
+                                            else
+                                            {
+                                                channelsCache[i] = raw;
+                                            }
+                                        }
+
+                                        if (isFirstFrame && TenoDXIO.IIRFilterFactor > 1) isFirstFrame = false;
+
+                                        // 将复用的 channelsCache 传递进去
+                                        TouchStateProcessor.ProcessFrame(channelsCache);
+                                    }
                                 }
                                 else if (status == 0x01)
                                 {
-                                    // STM32 刚刚启动/重启，正在向我们要配置！
                                     SendHardwareConfig();
                                 }
 
-                                // (若 status 处于 0x02 或 0x11~0x15 之间，是 STM32 执行校准阶段)
-                                // (我们不用做任何事，只需在下面把它这一帧正常剥离消费掉即可)
-
-                                buffer.RemoveRange(0, 70); // 消费完整的一帧
+                                // 步进 70 字节 (消费掉这一帧)
+                                processIndex += 70;
                             }
                             else
                             {
-                                buffer.RemoveAt(0); // 校验和不对，丢弃头部1个字节继续重新对齐找包
+                                // 校验失败，只往前走 1 个字节，尝试重新对齐包头
+                                processIndex++;
+                            }
+                        }
+
+                        // 3. 将未处理完的残余数据统一平移到数组头部
+                        if (processIndex > 0)
+                        {
+                            bufferLength -= processIndex;
+                            if (bufferLength > 0)
+                            {
+                                // Array.Copy 使用底层内存块复制，极快
+                                Array.Copy(streamBuffer, processIndex, streamBuffer, 0, bufferLength);
                             }
                         }
                     }
                     else
                     {
-                        Thread.Sleep(2);
+                        Thread.Sleep(1); // 缩短休眠，提高高刷新率下的响应速度
                     }
                 }
                 catch (Exception)
