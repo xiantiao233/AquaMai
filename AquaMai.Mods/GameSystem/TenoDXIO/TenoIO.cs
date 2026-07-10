@@ -162,6 +162,12 @@ namespace AquaMai.Mods.GameSystem
         [ConfigEntry("A区 - 极速抽离灵敏度", "Fast Lift Speed: 默认 -250")]
         public static int FastLiftSpeed = -250;
 
+        [ConfigEntry("A区 - 边缘突变触发速度(Deriv)", "边缘划过/轻触的突变速度阈值。默认 120")]
+        public static int EdgeTriggerDeriv = 150;
+
+        [ConfigEntry("A区 - 边缘突变触发最低形变(Diff)", "满足突变时所需的最低Diff防噪线。默认 200")]
+        public static int EdgeTriggerMinDiff = 300;
+
         // ================= C区 判定参数 =================
         [ConfigEntry("C区 - Diff 触发线", "默认 25")]
         public static int BlockC_DiffThreshold = 25;

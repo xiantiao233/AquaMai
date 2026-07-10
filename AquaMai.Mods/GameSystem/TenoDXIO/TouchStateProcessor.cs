@@ -184,6 +184,7 @@ namespace AquaMai.Mods.GameSystem
             private int diff_deriv_down_count = -1;
             private int up = 0;
             private bool lock_releasing = false;
+            private bool edge_holding = false;
 
             private int[] history_16 = new int[16];
             private int history_idx = 0;
@@ -195,6 +196,7 @@ namespace AquaMai.Mods.GameSystem
                 diff_deriv_down_count = -1;
                 up = 0;
                 lock_releasing = false;
+                edge_holding = false;
                 Array.Clear(history_16, 0, 16);
                 history_idx = 0;
                 history_filled = false;
@@ -234,6 +236,22 @@ namespace AquaMai.Mods.GameSystem
                     int customDiff = override_A[physicalChannel];
                     int on_default_diff = (customDiff != -1) ? customDiff : TenoDXIO.TriggerSensitivity;
 
+                    // ==========================================
+                    // 新增：动态突变触发 (边缘/轻触) 拦截
+                    // ==========================================
+                    bool is_fast_edge_strike = (diff_deriv >= TenoDXIO.EdgeTriggerDeriv) && (diff >= TenoDXIO.EdgeTriggerMinDiff);
+
+                    if (is_fast_edge_strike)
+                    {
+                        edge_holding = true; // 极速触发后，开启临时防断触保持
+                    }
+                    else if (diff < TenoDXIO.EdgeTriggerMinDiff - 50 || !is_pressed)
+                    {
+                        // 当形变低于安全释放线，或已经被正常的松手逻辑切断时，解除边缘保持
+                        edge_holding = false;
+                    }
+                    // ==========================================
+
                     if (diff > on_default_diff + 400 || diff < on_default_diff - 400) up = 0;
 
                     int on_diff = on_default_diff;
@@ -249,28 +267,37 @@ namespace AquaMai.Mods.GameSystem
                         case -1: on_diff = 800; break;
                     }
 
+                    // 【核心融入点】：如果是边缘突变引发的触发，我们将强制把判定下限锁定在较低的阈值防止立即断触
+                    if (edge_holding)
+                    {
+                        on_diff = Math.Min(on_diff, TenoDXIO.EdgeTriggerMinDiff);
+                    }
+
                     int absolute_safe_diff = TenoDXIO.QuickReleaseLine;
 
                     if (diff < 200) lock_releasing = false;
 
-                    if ((lock_releasing && diff_deriv > 150 && diff > on_diff) || diff > on_diff * 1.5)
+                    // 结合突变触发强制解除原有防抖锁定
+                    if ((lock_releasing && diff_deriv > 150 && diff > on_diff) || diff > on_diff * 1.5 || is_fast_edge_strike)
                     {
                         lock_releasing = false;
                     }
 
-                    if ((diff_deriv > 150 && diff > on_diff) || diff > on_diff * 1.5)
+                    if ((diff_deriv > 150 && diff > on_diff) || diff > on_diff * 1.5 || is_fast_edge_strike)
                     {
                         lock_releasing = false;
                         diff_deriv_down_count = 0;
                     }
 
-                    if (diff > on_diff)
+                    // ★ 修改主判定逻辑，为 is_fast_edge_strike 开辟直通车 ★
+                    if (diff > on_diff || is_fast_edge_strike)
                     {
                         if (diff_deriv_down_count > 0) diff_deriv_down_count--;
                         else if (lock_releasing) { }
                         else
                         {
-                            if (!is_pressed && diff_deriv < TenoDXIO.HoverSpeedMax && diff < TenoDXIO.HoverDiffMax) { }
+                            // 原有的 Hover 拦截逻辑：让我们的特权触发绕过拦截
+                            if (!is_pressed && diff_deriv < TenoDXIO.HoverSpeedMax && diff < TenoDXIO.HoverDiffMax && !is_fast_edge_strike) { }
                             else on = true;
                         }
                     }
