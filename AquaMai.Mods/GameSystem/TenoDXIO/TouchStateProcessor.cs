@@ -1,5 +1,8 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Reflection;
+using Manager;
 using MelonLoader;
 
 namespace AquaMai.Mods.GameSystem
@@ -9,11 +12,45 @@ namespace AquaMai.Mods.GameSystem
         private static ulong currentTouchMask = 0;
         private static readonly object dataLock = new object();
 
+        private static ulong latchedTouchMask = 0;
+        private static ulong lastReadResult = 0;
+        private static DateTime lastReadTime = DateTime.MinValue;
 
-        // ======= 新增以下三个变量 =======
-        private static ulong latchedTouchMask = 0; // 用于记录瞬时按下的锁存掩码
-        private static ulong lastReadResult = 0;   // 缓存上一次给游戏返回的结果
-        private static DateTime lastReadTime = DateTime.MinValue; // 防止同一帧多次读取导致锁存失效
+        // ========= 判定日志集成支持 =========
+        // 主线程每帧写入、串口线程读取的共享时间基准（单位: ms，对应 NotesManager.GetCurrentMsec()）
+        public static volatile float CurrentGameTimeMs;
+        // 主线程每帧递增的帧号
+        public static volatile int CurrentFrameNumber;
+
+        // 存储最新 34 通道原始电容值（串口线程 ProcessFrame 中写入，主线程只读）
+        private static readonly ushort[] currentRawValues = new ushort[34];
+        // 每通道当前按下状态
+        private static readonly bool[] currentTouchState = new bool[34];
+
+        // ButtonId(0-7) → 物理通道号(0-33) 反向映射
+        // 用于判定日志中根据轨道号查出对应的物理通道
+        private static readonly int[] buttonIdToPhysicalChannel = new int[8];
+
+        // ========= 判定事件缓冲 =========
+        // 主线程 Harmony Patch 产生判定事件入队，帧末尾统一出队写入日志文件
+        public static readonly ConcurrentQueue<JudgeLogEntry> JudgeLogBuffer = new ConcurrentQueue<JudgeLogEntry>();
+
+        // 判定日志条目
+        public struct JudgeLogEntry
+        {
+            public float GameTimeMs;        // 游戏内毫秒时间 NotesManager.GetCurrentMsec()
+            public int FrameNumber;         // 当前帧号
+            public int ButtonId;            // 0-7 轨道号
+            public int MonitorId;           // 0=1P, 1=2P
+            public NoteJudge.ETiming Timing;   // 15 级判定枚举
+            public float DiffMsec;          // 判定时间差（负数=提前触发）
+            public string NoteTypeStr;      // "TAP" / "HOLD" / "SLIDE" / "TOUCH" / "BREAK"
+            public int PhysicalChannel;     // 0-33 物理通道
+            public string LogicalName;      // "A5" 等逻辑名称
+            public ushort CurrentRaw;       // 该通道当前原始电容值
+            public int SetupRaw;            // 该通道校准基线
+            public bool TouchState;         // 当前是否按下
+        }
 
         // 逻辑掩码存储
         private static ulong[] logicalToMaskMap = new ulong[34];
@@ -42,9 +79,6 @@ namespace AquaMai.Mods.GameSystem
         {
             TenoDXIO.InitFileLogger();
 
-            // ===============================================
-            // 【核心注入】：读取并应用 MelonLoader 配置文件中的映射表
-            // ===============================================
             TenoDXIO.ApplyHardwareMapping();
 
             InitMappings();
@@ -54,9 +88,11 @@ namespace AquaMai.Mods.GameSystem
 
         private static void InitMappings()
         {
+            // 初始化 ButtonId→物理通道 反向映射
+            for (int _i = 0; _i < buttonIdToPhysicalChannel.Length; _i++) buttonIdToPhysicalChannel[_i] = -1;
+
             for (int i = 0; i < 34; i++)
             {
-                // 改由核心全局配置文件获取映射
                 string logical = HardwareConfig.PhysicalToLogicalMap[i];
                 int maskShift = 0;
                 char block = logical[0];
@@ -71,6 +107,12 @@ namespace AquaMai.Mods.GameSystem
                     case 'E': maskShift = 26 + num; break;
                 }
                 logicalToMaskMap[i] = 1UL << maskShift;
+
+                // 构建 ButtonId → 物理通道的反查表（以首次出现的 A 区映射为准）
+                if (block == 'A' && num >= 0 && num < 8 && buttonIdToPhysicalChannel[num] == -1)
+                {
+                    buttonIdToPhysicalChannel[num] = i;
+                }
             }
         }
 
@@ -104,6 +146,13 @@ namespace AquaMai.Mods.GameSystem
         }
 
         public static string GetLogicalName(int physicalChannel) => HardwareConfig.PhysicalToLogicalMap[physicalChannel];
+
+        // ========= 新增：公开原始值和校准基线的访问（供主线程判定日志使用） =========
+        public static ushort GetCurrentRaw(int physChannel) => currentRawValues[physChannel];
+        public static int GetSetupRaw(int physChannel) => setupRaw[physChannel];
+        public static bool GetTouchState(int physChannel) => currentTouchState[physChannel];
+        public static int GetPhysicalChannelForButton(int buttonId) =>
+            buttonId >= 0 && buttonId < 8 ? buttonIdToPhysicalChannel[buttonId] : -1;
 
         public static void ResetCalibration()
         {
@@ -140,7 +189,14 @@ namespace AquaMai.Mods.GameSystem
             for (int physIdx = 0; physIdx < 34; physIdx++)
             {
                 int currentVal = physicalChannels[physIdx];
+
+                // 存储最新原始值（判定日志读取）
+                currentRawValues[physIdx] = physicalChannels[physIdx];
+
                 bool isPressed = detectors[physIdx].ProcessFrame(physIdx, currentVal, setupRaw[physIdx]);
+
+                // 存储按下状态
+                currentTouchState[physIdx] = isPressed;
 
                 if (isPressed)
                 {
@@ -148,11 +204,10 @@ namespace AquaMai.Mods.GameSystem
                 }
             }
 
-            // ======= 改为如下代码 =======
             lock (dataLock)
             {
-                currentTouchMask = newTouchMask; // 依然记录当前的物理真实状态
-                latchedTouchMask |= newTouchMask; // 按位或：只要在此期间触发过，就把这一位锁死为 1
+                currentTouchMask = newTouchMask;
+                latchedTouchMask |= newTouchMask;
             }
         }
 
@@ -160,17 +215,13 @@ namespace AquaMai.Mods.GameSystem
         {
             lock (dataLock)
             {
-                // 防抖：如果游戏在 2 毫秒内多次请求读取（说明是同一帧内的重复读取）
-                // 直接返回缓存的结果，不重置锁存器
                 if ((DateTime.Now - lastReadTime).TotalMilliseconds < 2.0)
                 {
                     return lastReadResult;
                 }
 
-                // 最终结果 = 自上次读取后瞬间按下的键 (latched) + 当前手指还真实按在上面的键 (current)
                 lastReadResult = latchedTouchMask | currentTouchMask;
 
-                // 【核心】游戏读取完毕后，将锁存器重置为当前的物理真实状态
                 latchedTouchMask = currentTouchMask;
                 lastReadTime = DateTime.Now;
 
@@ -236,21 +287,16 @@ namespace AquaMai.Mods.GameSystem
                     int customDiff = override_A[physicalChannel];
                     int on_default_diff = (customDiff != -1) ? customDiff : TenoDXIO.TriggerSensitivity;
 
-                    // ==========================================
-                    // 新增：动态突变触发 (边缘/轻触) 拦截
-                    // ==========================================
                     bool is_fast_edge_strike = (diff_deriv >= TenoDXIO.EdgeTriggerDeriv) && (diff >= TenoDXIO.EdgeTriggerMinDiff);
 
                     if (is_fast_edge_strike)
                     {
-                        edge_holding = true; // 极速触发后，开启临时防断触保持
+                        edge_holding = true;
                     }
                     else if (diff < TenoDXIO.EdgeTriggerMinDiff - 50 || !is_pressed)
                     {
-                        // 当形变低于安全释放线，或已经被正常的松手逻辑切断时，解除边缘保持
                         edge_holding = false;
                     }
-                    // ==========================================
 
                     if (diff > on_default_diff + 400 || diff < on_default_diff - 400) up = 0;
 
@@ -267,7 +313,6 @@ namespace AquaMai.Mods.GameSystem
                         case -1: on_diff = 800; break;
                     }
 
-                    // 【核心融入点】：如果是边缘突变引发的触发，我们将强制把判定下限锁定在较低的阈值防止立即断触
                     if (edge_holding)
                     {
                         on_diff = Math.Min(on_diff, TenoDXIO.EdgeTriggerMinDiff);
@@ -277,7 +322,6 @@ namespace AquaMai.Mods.GameSystem
 
                     if (diff < 200) lock_releasing = false;
 
-                    // 结合突变触发强制解除原有防抖锁定
                     if ((lock_releasing && diff_deriv > 150 && diff > on_diff) || diff > on_diff * 1.5 || is_fast_edge_strike)
                     {
                         lock_releasing = false;
@@ -289,14 +333,12 @@ namespace AquaMai.Mods.GameSystem
                         diff_deriv_down_count = 0;
                     }
 
-                    // ★ 修改主判定逻辑，为 is_fast_edge_strike 开辟直通车 ★
                     if (diff > on_diff || is_fast_edge_strike)
                     {
                         if (diff_deriv_down_count > 0) diff_deriv_down_count--;
                         else if (lock_releasing) { }
                         else
                         {
-                            // 原有的 Hover 拦截逻辑：让我们的特权触发绕过拦截
                             if (!is_pressed && diff_deriv < TenoDXIO.HoverSpeedMax && diff < TenoDXIO.HoverDiffMax && !is_fast_edge_strike) { }
                             else on = true;
                         }

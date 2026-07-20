@@ -1,0 +1,1104 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>日志数据分析器 - 统一格式版(HW/FRAME/JUDGE)</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        :root {
+            --primary: #3b82f6;
+            --success: #10b981;
+            --danger: #ef4444;
+            --judge: #8b5cf6;
+            --bg-color: #f8fafc;
+            --card-bg: #ffffff;
+            --border: #e2e8f0;
+            --text-main: #1e293b;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-main);
+            margin: 0;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+
+        h1 { font-size: 24px; margin-bottom: 20px; }
+        h3 { font-size: 18px; margin: 0; }
+
+        .card {
+            background: var(--card-bg);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 20px;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+        }
+
+        .control-group { margin-bottom: 15px; }
+        .control-group label {
+            font-weight: bold;
+            display: block;
+            margin-bottom: 5px;
+            font-size: 14px;
+        }
+
+        input[type="file"], input[type="number"], input[type="text"], select {
+            padding: 8px;
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            font-size: 14px;
+        }
+
+        input[type="number"] { width: 160px; }
+        input[type="text"] { width: 180px; font-family: monospace; }
+
+        select {
+            min-width: 150px;
+            cursor: pointer;
+            background-color: #fff;
+        }
+
+        button {
+            background-color: var(--primary);
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: background-color 0.2s;
+        }
+        button:hover { background-color: #2563eb; }
+        button:disabled { background-color: #94a3b8; cursor: not-allowed; }
+
+        .chart-container {
+            position: relative;
+            height: 600px;
+            width: 100%;
+        }
+
+        textarea {
+            width: 100%;
+            height: 200px;
+            padding: 10px;
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            font-family: monospace;
+            font-size: 12px;
+            resize: vertical;
+            box-sizing: border-box;
+        }
+
+        .flex-row {
+            display: flex;
+            gap: 20px;
+            align-items: flex-end;
+            flex-wrap: wrap;
+        }
+
+        .stat-row {
+            display: flex;
+            gap: 20px;
+            flex-wrap: wrap;
+            margin-top: 10px;
+            font-size: 13px;
+            color: #64748b;
+        }
+        .stat-row span { background: #f1f5f9; padding: 4px 10px; border-radius: 4px; }
+
+        .judge-legend {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            background: #f5f3ff;
+            padding: 4px 12px;
+            border-radius: 4px;
+            font-size: 13px;
+            color: #6d28d9;
+        }
+        .judge-legend::before {
+            content: "";
+            display: inline-block;
+            width: 20px;
+            height: 2px;
+            background: #8b5cf6;
+            border-top: 4px dashed #8b5cf6;
+        }
+
+        .color-dot {
+            display: inline-block;
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            margin-right: 4px;
+        }
+
+        .bookmark-btn-group {
+            display: inline-flex;
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            overflow: hidden;
+            align-items: center;
+            box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+        }
+        .bookmark-apply {
+            background-color: #f1f5f9;
+            color: var(--text-main);
+            border: none;
+            padding: 6px 12px;
+            font-size: 12px;
+            border-radius: 0;
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }
+        .bookmark-apply:hover { background-color: #e2e8f0; }
+        .bookmark-del {
+            background-color: #fee2e2;
+            color: var(--danger);
+            border: none;
+            padding: 6px 10px;
+            font-size: 12px;
+            border-radius: 0;
+            cursor: pointer;
+            font-weight: bold;
+            transition: background-color 0.2s;
+        }
+        .bookmark-del:hover { background-color: #fca5a5; }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <h1>触摸传感器 + 判定联合分析器 (统一格式)</h1>
+
+        <div class="card">
+            <div class="flex-row" style="margin-bottom: 15px;">
+                <div class="control-group" style="margin-bottom: 0;">
+                    <label for="fileInput">1. 上传日志文件 (.txt)</label>
+                    <input type="file" id="fileInput" accept=".txt" multiple>
+                </div>
+                <div style="align-self: center; margin-bottom: 4px;">
+                    <span id="fileStatus" style="color: #64748b; font-size: 14px;">等待上传...</span>
+                </div>
+            </div>
+
+            <div class="flex-row" style="border-bottom: 1px dashed var(--border); padding-bottom: 15px; margin-bottom: 15px;">
+                <div class="control-group">
+                    <label for="zoneSelect">2. 选择通道</label>
+                    <select id="zoneSelect" disabled>
+                        <option value="">请先上传文件...</option>
+                    </select>
+                </div>
+
+                <div class="control-group">
+                    <label for="startWallTime">开始时间 (墙钟 HH:mm:ss.fff)</label>
+                    <input type="text" id="startWallTime" placeholder="例如 23:33:38.489">
+                </div>
+                <div class="control-group">
+                    <label for="endWallTime">结束时间 (墙钟 HH:mm:ss.fff)</label>
+                    <input type="text" id="endWallTime" placeholder="例如 23:33:45.123">
+                </div>
+                <button id="updateBtn" disabled>筛选并更新图表</button>
+
+                <div class="control-group" style="margin-bottom:0;">
+                    <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-weight:bold;font-size:14px;">
+                        <input type="checkbox" id="showJudge" checked> 显示判定信息
+                    </label>
+                </div>
+                <div class="judge-legend">判定事件 (JUDGE)</div>
+            </div>
+
+            <div>
+                <label>3. 时间轴视图暂存</label>
+                <div style="display: flex; gap: 15px; align-items: center; flex-wrap: wrap; margin-top: 5px;">
+                    <button id="saveViewBtn" style="background-color: var(--success); padding: 8px 16px;" disabled>
+                        📌 暂存当前视图
+                    </button>
+                    <div id="savedViewsContainer" style="display: flex; gap: 8px; flex-wrap: wrap;"></div>
+                </div>
+            </div>
+
+            <div class="stat-row" id="statsDisplay">
+                统计数据: 等待加载...
+            </div>
+        </div>
+
+        <div class="card">
+            <h3 id="chartTitle">通道数据波形图</h3>
+            <div class="chart-container">
+                <canvas id="dataChart"></canvas>
+            </div>
+        </div>
+
+        <div class="card">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                <h3 style="margin: 0;">当前视图原始数据 (最多显示2000条防卡死)</h3>
+                <button id="copyBtn" disabled>📋 复制数据</button>
+            </div>
+            <textarea id="rawDataDisplay" readonly placeholder="图表更新后，这里将显示对应的原始文本数据..."></textarea>
+        </div>
+    </div>
+
+    <script>
+        // ======================== 数据存储 ========================
+        let allHWData = [];          // HW 条目
+        let allFrameData = [];       // FRAME 条目
+        let allJudgeData = [];       // JUDGE 条目
+        let availableZones = new Set();
+        let chartInstance = null;
+        let savedViews = [];
+        let wallTimeBase = null;     // 基准墙钟秒数（第一条 FRAME 的墙钟），用于计算 wallSec
+
+        // ======================== DOM 引用 ========================
+        const fileInput = document.getElementById('fileInput');
+        const fileStatus = document.getElementById('fileStatus');
+        const zoneSelect = document.getElementById('zoneSelect');
+        const updateBtn = document.getElementById('updateBtn');
+        const copyBtn = document.getElementById('copyBtn');
+        const rawDataDisplay = document.getElementById('rawDataDisplay');
+        const startWallTime = document.getElementById('startWallTime');
+        const endWallTime = document.getElementById('endWallTime');
+        const showJudgeCheck = document.getElementById('showJudge');
+        const chartTitle = document.getElementById('chartTitle');
+        const saveViewBtn = document.getElementById('saveViewBtn');
+        const savedViewsContainer = document.getElementById('savedViewsContainer');
+        const statsDisplay = document.getElementById('statsDisplay');
+
+        // ======================== 工具函数 ========================
+
+        // 墙钟 "HH:mm:ss.fff" -> 秒数
+        function wallTimeToSeconds(s) {
+            if (!s) return null;
+            let parts = s.split(':');
+            if (parts.length !== 3) return null;
+            let h = parseInt(parts[0], 10);
+            let m = parseInt(parts[1], 10);
+            let sec = parseFloat(parts[2]);
+            if (isNaN(h) || isNaN(m) || isNaN(sec)) return null;
+            return h * 3600 + m * 60 + sec;
+        }
+
+        // 墙钟时间 -> 距基准的秒数偏移（用于 x 轴和过滤）
+        function getWallSec(wallStr) {
+            let s = wallTimeToSeconds(wallStr);
+            if (s === null || wallTimeBase === null) return 0;
+            return s - wallTimeBase;
+        }
+
+        // 简化判定类别显示
+        function getSimplifiedTiming(timing) {
+            switch (timing) {
+                case 'CRITICAL':      return { cat: 'Critical', dir: '' };
+                case 'FAST_PERFECT':  return { cat: 'Perfect',  dir: 'Fast' };
+                case 'LATE_PERFECT':  return { cat: 'Perfect',  dir: 'Late' };
+                case 'FAST_GREAT':    return { cat: 'Great',    dir: 'Fast' };
+                case 'LATE_GREAT':    return { cat: 'Great',    dir: 'Late' };
+                case 'FAST_GOOD':     return { cat: 'Good',     dir: 'Fast' };
+                case 'LATE_GOOD':     return { cat: 'Good',     dir: 'Late' };
+                case 'FAST_MISS':     return { cat: 'Miss',     dir: 'Fast' };
+                case 'LATE_MISS':     return { cat: 'Miss',     dir: 'Late' };
+                default:              return { cat: timing,     dir: '' };
+            }
+        }
+
+        // 判定类别 → 颜色
+        function getJudgeColor(cat) {
+            switch (cat) {
+                case 'Critical': return '#FFD700';
+                case 'Perfect':  return '#10b981';
+                case 'Great':    return '#3b82f6';
+                case 'Good':     return '#f59e0b';
+                case 'Miss':     return '#ef4444';
+                default:         return '#8b5cf6';
+            }
+        }
+
+        // ======================== 日志解析 ========================
+        // 统一格式: [墙钟HH:mm:ss.fff] [游戏ms] [条目类型] ...
+
+        // HW: [墙钟] [游戏ms] [HW] [Ch:物理通道] [Block:区块] [逻辑名] Raw:原始值 Base:基线 Diff:差值 Deriv:变化率 Stat:状态
+        const HW_REGEX = /^\[(\S+)\] \[([\d.]+)\] \[HW\] \[Ch:(\d+)\] \[Block:(.)\] \[(\w+)\] Raw:(\d+) Base:([\d.]+) Diff:(-?\d+) Deriv:(-?\d+) Stat:(\d+)/;
+
+        // FRAME: [墙钟] [游戏ms] [FRAME] Frame:帧号 UnityTime:秒
+        const FRAME_REGEX = /^\[(\S+)\] \[([\d.]+)\] \[FRAME\] Frame:(\d+) UnityTime:([\d.]+)/;
+
+        // JUDGE: [墙钟] [游戏ms] [JUDGE] [Frame:帧号] [Ch:物理通道] [逻辑名] Note:类型 Timing:简化判定 Msec:时间差ms | ...
+        // Timing: CRITICAL / FAST_PERFECT / LATE_PERFECT / FAST_GREAT / LATE_GREAT / FAST_GOOD / LATE_GOOD / FAST_MISS / LATE_MISS
+        const JUDGE_REGEX = /^\[(\S+)\] \[([\d.]+)\] \[JUDGE\] \[Frame:(\d+)\] \[Ch:(\d+)\] \[(\w+)\] Note:(\w+) Timing:(\w+) Msec:(-?[\d.]+)ms \| CurrRaw:(\d+) Base:(\d+) Diff:(-?\d+) Stat:(\d+)/;
+
+        function parseLine(line) {
+            let m;
+
+            m = line.match(HW_REGEX);
+            if (m) {
+                return {
+                    type: 'HW',
+                    wallTime: m[1],
+                    gameTimeMs: parseFloat(m[2]),
+                    ch: parseInt(m[3]),
+                    block: m[4],
+                    zone: m[5],
+                    raw: parseInt(m[6]),
+                    base: parseFloat(m[7]),
+                    diff: parseInt(m[8]),
+                    deriv: parseInt(m[9]),
+                    stat: parseInt(m[10])
+                };
+            }
+
+            m = line.match(FRAME_REGEX);
+            if (m) {
+                return {
+                    type: 'FRAME',
+                    wallTime: m[1],
+                    gameTimeMs: parseFloat(m[2]),
+                    frameNum: parseInt(m[3]),
+                    unityTime: parseFloat(m[4])
+                };
+            }
+
+            m = line.match(JUDGE_REGEX);
+            if (m) {
+                return {
+                    type: 'JUDGE',
+                    wallTime: m[1],
+                    gameTimeMs: parseFloat(m[2]),
+                    frameNum: parseInt(m[3]),
+                    ch: parseInt(m[4]),
+                    zone: m[5],
+                    noteType: m[6],
+                    timing: m[7],
+                    diffMsec: parseFloat(m[8]),
+                    currRaw: parseInt(m[9]),
+                    base: parseInt(m[10]),
+                    diff: parseInt(m[11]),
+                    stat: parseInt(m[12])
+                };
+            }
+
+            return null;
+        }
+
+        // ======================== 墙钟时间查询 ========================
+        // 根据 wallSec 找最近的 FRAME 墙钟时间
+        function getWallTimeBySec(wallSec) {
+            if (allFrameData.length === 0) return null;
+            let lo = 0, hi = allFrameData.length - 1;
+            while (lo < hi - 1) {
+                let mid = (lo + hi) >> 1;
+                if (allFrameData[mid].wallSec <= wallSec) lo = mid;
+                else hi = mid;
+            }
+            let nearest = allFrameData[lo];
+            if (hi !== lo && Math.abs(allFrameData[hi].wallSec - wallSec) < Math.abs(nearest.wallSec - wallSec)) {
+                nearest = allFrameData[hi];
+            }
+            return nearest.wallTime;
+        }
+
+        // ======================== 文件处理 ========================
+        fileInput.addEventListener('change', async (e) => {
+            const files = e.target.files;
+            if (files.length === 0) return;
+
+            allHWData = [];
+            allFrameData = [];
+            allJudgeData = [];
+            availableZones.clear();
+            fileStatus.textContent = '正在读取和解析...';
+            updateBtn.disabled = true;
+            zoneSelect.disabled = true;
+            saveViewBtn.disabled = true;
+
+            setTimeout(async () => {
+                for (let file of files) {
+                    const text = await file.text();
+                    const lines = text.split('\n');
+
+                    for (let line of lines) {
+                        line = line.trim();
+                        if (!line) continue;
+
+                        const parsed = parseLine(line);
+                        if (!parsed) continue;
+
+                        switch (parsed.type) {
+                            case 'HW':
+                                allHWData.push(parsed);
+                                availableZones.add(parsed.zone);
+                                break;
+                            case 'FRAME':
+                                allFrameData.push(parsed);
+                                break;
+                            case 'JUDGE':
+                                allJudgeData.push(parsed);
+                                availableZones.add(parsed.zone);
+                                break;
+                        }
+                    }
+                }
+
+                // 按墙钟时间排序
+                allHWData.sort((a, b) => a.wallTime.localeCompare(b.wallTime));
+                allFrameData.sort((a, b) => a.wallTime.localeCompare(b.wallTime));
+                allJudgeData.sort((a, b) => a.wallTime.localeCompare(b.wallTime));
+
+                // 计算 wallTimeBase（基准秒数）
+                if (allFrameData.length > 0) {
+                    wallTimeBase = wallTimeToSeconds(allFrameData[0].wallTime);
+                } else if (allHWData.length > 0) {
+                    wallTimeBase = wallTimeToSeconds(allHWData[0].wallTime);
+                } else if (allJudgeData.length > 0) {
+                    wallTimeBase = wallTimeToSeconds(allJudgeData[0].wallTime);
+                }
+
+                // 给每个条目补充 wallSec = 距基准的秒数偏移（用于过滤和 x 轴）
+                for (let item of allHWData) item.wallSec = getWallSec(item.wallTime);
+                for (let item of allFrameData) item.wallSec = getWallSec(item.wallTime);
+                for (let item of allJudgeData) item.wallSec = getWallSec(item.wallTime);
+
+                let zonesArray = Array.from(availableZones).sort();
+                if (zonesArray.length === 0 && allFrameData.length === 0) {
+                    fileStatus.textContent = '未找到符合格式的日志数据！';
+                    return;
+                }
+
+                // 如果没有 HW 数据但至少有一帧，添加一个虚拟选项
+                if (zonesArray.length === 0 && allFrameData.length > 0) {
+                    zonesArray = ['(仅判定数据)'];
+                }
+
+                zoneSelect.innerHTML = '';
+                zonesArray.forEach(zone => {
+                    const option = document.createElement('option');
+                    option.value = zone;
+                    option.textContent = `通道: ${zone}`;
+                    zoneSelect.appendChild(option);
+                });
+
+                // 根据 FRAME 设置默认墙钟时间范围
+                if (allFrameData.length > 0) {
+                    startWallTime.value = allFrameData[0].wallTime;
+                    endWallTime.value = allFrameData[allFrameData.length - 1].wallTime;
+                } else {
+                    startWallTime.value = '00:00:00.000';
+                    endWallTime.value = '00:00:00.000';
+                }
+
+                fileStatus.textContent =
+                    `加载完成 | HW:${allHWData.length} 条 | FRAME:${allFrameData.length} 条 | JUDGE:${allJudgeData.length} 条 | ${zonesArray.length} 个通道`;
+                updateBtn.disabled = false;
+                zoneSelect.disabled = false;
+                saveViewBtn.disabled = false;
+
+                updateBtn.click();
+            }, 50);
+        });
+
+        zoneSelect.addEventListener('change', () => { updateBtn.click(); });
+        showJudgeCheck.addEventListener('change', () => { updateBtn.click(); });
+
+        // ======================== 暂存视图 ========================
+        saveViewBtn.addEventListener('click', () => {
+            const targetZone = zoneSelect.value;
+            if (!targetZone) return;
+            savedViews.push({
+                id: Date.now(),
+                zone: targetZone,
+                startTime: startWallTime.value,
+                endTime: endWallTime.value
+            });
+            renderSavedViews();
+        });
+
+        function renderSavedViews() {
+            savedViewsContainer.innerHTML = '';
+            if (savedViews.length === 0) {
+                savedViewsContainer.innerHTML = '<span style="color: #94a3b8; font-size: 14px;">暂无暂存视图</span>';
+                return;
+            }
+            savedViews.forEach((view) => {
+                const btnGroup = document.createElement('div');
+                btnGroup.className = 'bookmark-btn-group';
+                const applyBtn = document.createElement('button');
+                applyBtn.className = 'bookmark-apply';
+                applyBtn.innerText = `[${view.zone}] (${view.startTime} ~ ${view.endTime})`;
+                applyBtn.addEventListener('click', () => {
+                    zoneSelect.value = view.zone;
+                    startWallTime.value = view.startTime;
+                    endWallTime.value = view.endTime;
+                    updateBtn.click();
+                });
+                const delBtn = document.createElement('button');
+                delBtn.className = 'bookmark-del';
+                delBtn.innerText = '✕';
+                delBtn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    savedViews = savedViews.filter(v => v.id !== view.id);
+                    renderSavedViews();
+                });
+                btnGroup.appendChild(applyBtn);
+                btnGroup.appendChild(delBtn);
+                savedViewsContainer.appendChild(btnGroup);
+            });
+        }
+
+        // ======================== 图表更新 ========================
+        updateBtn.addEventListener('click', () => {
+            const targetZone = zoneSelect.value;
+            if (!targetZone) return;
+
+            // === 1. 墙钟时间 → 秒偏移 ===
+            let startSec = -Infinity, endSec = Infinity;
+            const startWall = startWallTime.value.trim();
+            const endWall = endWallTime.value.trim();
+            if (startWall && wallTimeBase !== null) {
+                let s = wallTimeToSeconds(startWall);
+                if (s !== null) startSec = s - wallTimeBase;
+            }
+            if (endWall && wallTimeBase !== null) {
+                let s = wallTimeToSeconds(endWall);
+                if (s !== null) endSec = s - wallTimeBase;
+            }
+
+            // === 2. 按墙钟秒偏移过滤数据 ===
+            const filteredHW = allHWData.filter(item =>
+                item.zone === targetZone && item.wallSec >= startSec && item.wallSec <= endSec
+            );
+            const filteredJudge = allJudgeData.filter(item =>
+                item.zone === targetZone && item.wallSec >= startSec && item.wallSec <= endSec
+            );
+            const filteredFrame = allFrameData.filter(item =>
+                item.wallSec >= startSec && item.wallSec <= endSec
+            );
+
+            // === 3. 统计数据 ===
+            const judgeEarly = filteredJudge.filter(j => j.diffMsec < 0).length;
+            const judgeLate = filteredJudge.filter(j => j.diffMsec >= 0).length;
+            let statsHtml = `<span>HW 数据: ${filteredHW.length} 条</span>`;
+            if (filteredJudge.length > 0) {
+                // 按类别统计
+                const catCounts = {};
+                for (let j of filteredJudge) {
+                    const s = getSimplifiedTiming(j.timing);
+                    const key = s.dir ? `${s.cat}(${s.dir})` : s.cat;
+                    catCounts[key] = (catCounts[key] || 0) + 1;
+                }
+                statsHtml += `<span>判定事件: ${filteredJudge.length} 次 (提前 ${judgeEarly}, 延迟 ${judgeLate})</span>`;
+                statsHtml += `<span style="background:#fef3c7;">` +
+                    Object.entries(catCounts).map(([k, v]) => `${k}:${v}`).join(' | ') + `</span>`;
+            } else {
+                statsHtml += `<span>判定事件: 0 次</span>`;
+            }
+            statsHtml += `<span>FRAME 标记: ${filteredFrame.length} 帧</span>`;
+            statsHtml += `<span>时间范围: ${startSec.toFixed(2)}s ~ ${endSec.toFixed(2)}s</span>`;
+            statsHtml += `<span>墙钟: ${startWall || '?'} ~ ${endWall || '?'}</span>`;
+            statsDisplay.innerHTML = statsHtml;
+
+            // === 4. 原始文本显示 ===
+            const MAX_RAW = 2000;
+            const displayItems = [];
+            let hwIdx = 0, frIdx = 0, jgIdx = 0;
+            while (hwIdx < filteredHW.length || frIdx < filteredFrame.length || jgIdx < filteredJudge.length) {
+                let hwT = hwIdx < filteredHW.length ? filteredHW[hwIdx].wallSec : Infinity;
+                let frT = frIdx < filteredFrame.length ? filteredFrame[frIdx].wallSec : Infinity;
+                let jgT = jgIdx < filteredJudge.length ? filteredJudge[jgIdx].wallSec : Infinity;
+                if (hwT <= frT && hwT <= jgT) { displayItems.push(filteredHW[hwIdx]); hwIdx++; }
+                else if (frT <= hwT && frT <= jgT) { displayItems.push(filteredFrame[frIdx]); frIdx++; }
+                else { displayItems.push(filteredJudge[jgIdx]); jgIdx++; }
+                if (displayItems.length >= MAX_RAW) break;
+            }
+            rawDataDisplay.value = displayItems.map(item => JSON.stringify(item)).join('\n');
+            if (hwIdx < filteredHW.length || frIdx < filteredFrame.length || jgIdx < filteredJudge.length) {
+                rawDataDisplay.value += '\n\n... (省略后续条目) ...';
+            }
+            copyBtn.disabled = displayItems.length === 0;
+
+            // === 5. 绘制图表 ===
+            if (chartInstance) { chartInstance.destroy(); chartInstance = null; }
+
+            const showJudge = showJudgeCheck.checked;
+
+            if (filteredHW.length > 0) {
+                // ----- 有 HW 数据的完整图表 -----
+                buildFullChart(filteredHW, filteredJudge, filteredFrame, showJudge, targetZone, startSec, endSec);
+            } else if (filteredJudge.length > 0) {
+                // ----- 仅判定数据（无 HW） -----
+                buildJudgeOnlyChart(filteredJudge, filteredFrame, showJudge, targetZone, startSec, endSec);
+            } else if (filteredFrame.length > 0) {
+                // ----- 仅有帧标记 -----
+                chartTitle.textContent = `通道 [${targetZone}] - 仅有帧标记`;
+            }
+        });
+
+        function getJudgeCategoryIndex(cat) {
+            const cats = ['Critical', 'Perfect', 'Great', 'Good', 'Miss'];
+            return cats.indexOf(cat);
+        }
+
+        function buildFullChart(filteredHW, filteredJudge, filteredFrame, showJudge, targetZone, startSec, endSec) {
+            chartTitle.textContent = `通道 [${targetZone}] 详细波形分析`;
+
+            const labels = filteredHW.map(item => item.wallSec);
+            const rawData = filteredHW.map(item => item.raw);
+            const baseData = filteredHW.map(item => item.base);
+            const diffData = filteredHW.map(item => item.diff);
+            const derivData = filteredHW.map(item => item.deriv);
+            const statData = filteredHW.map(item => item.stat);
+
+            // 将判定点映射到最近的 HW 索引
+            let judgeY = new Array(filteredHW.length).fill(null);
+            let judgeColors = new Array(filteredHW.length).fill('transparent');
+            let judgeLabels = new Array(filteredHW.length).fill('');
+
+            if (showJudge) {
+                for (let j of filteredJudge) {
+                    let idx = filteredHW.findIndex(hw => Math.abs(hw.wallSec - j.wallSec) < 0.05);
+                    if (idx === -1) {
+                        let insertIdx = filteredHW.findIndex(hw => hw.wallSec >= j.wallSec);
+                        if (insertIdx === -1) insertIdx = filteredHW.length - 1;
+                        idx = insertIdx;
+                    }
+                    if (idx >= 0 && idx < filteredHW.length) {
+                        judgeY[idx] = j.diffMsec;
+                        const s = getSimplifiedTiming(j.timing);
+                        const catColor = getJudgeColor(s.cat);
+                        judgeColors[idx] = catColor;
+                        const dirLabel = s.dir ? ` (${s.dir})` : '';
+                        judgeLabels[idx] = `${j.noteType} ${s.cat}${dirLabel} ${j.diffMsec >= 0 ? '+' : ''}${j.diffMsec.toFixed(2)}ms [${j.wallTime}]`;
+                    }
+                }
+            }
+
+            const frameMarkers = filteredFrame.map(f => f.wallSec);
+
+            const datasets = [
+                {
+                    label: 'Raw (原始值)',
+                    data: rawData,
+                    borderColor: '#3b82f6',
+                    borderWidth: 2,
+                    yAxisID: 'y',
+                    pointRadius: 0,
+                    pointHoverRadius: 5,
+                    tension: 0
+                },
+                {
+                    label: 'Base (基线)',
+                    data: baseData,
+                    borderColor: '#94a3b8',
+                    borderWidth: 2,
+                    borderDash: [5, 5],
+                    yAxisID: 'y',
+                    pointRadius: 0,
+                    pointHoverRadius: 5,
+                    tension: 0
+                },
+                {
+                    label: 'Diff (差值)',
+                    data: diffData,
+                    borderColor: '#f59e0b',
+                    borderWidth: 2,
+                    yAxisID: 'yDiff',
+                    pointRadius: 0,
+                    pointHoverRadius: 5,
+                    tension: 0
+                },
+                {
+                    label: 'Deriv (导数)',
+                    data: derivData,
+                    borderColor: '#ef4444',
+                    borderWidth: 1.5,
+                    borderDash: [3, 3],
+                    yAxisID: 'yDiff',
+                    pointRadius: 0,
+                    pointHoverRadius: 0,
+                    tension: 0
+                },
+                {
+                    label: 'Stat (触发状态)',
+                    data: statData,
+                    borderColor: '#10b981',
+                    backgroundColor: 'rgba(16, 185, 129, 0.15)',
+                    borderWidth: 1.5,
+                    yAxisID: 'yStat',
+                    stepped: true,
+                    fill: true,
+                    pointRadius: 0,
+                    pointHoverRadius: 0
+                }
+            ];
+
+            if (showJudge && filteredJudge.length > 0) {
+                datasets.push({
+                    label: 'JUDGE (判定时间差 ms)',
+                    data: judgeY,
+                    borderColor: '#8b5cf6',
+                    backgroundColor: judgeColors,
+                    borderWidth: 2,
+                    yAxisID: 'yJudge',
+                    showLine: false,
+                    pointRadius: 6,
+                    pointHoverRadius: 10,
+                    pointStyle: 'triangle',
+                    spanGaps: false
+                });
+            }
+
+            const ctx = document.getElementById('dataChart').getContext('2d');
+
+            const frameLinePlugin = {
+                id: 'frameLines',
+                afterDraw(chart) {
+                    const ctx2 = chart.ctx;
+                    const xAxis = chart.scales.x;
+                    const yAxis = chart.scales.y;
+                    ctx2.save();
+
+                    // ---- y=0 基准线 (Critical 分界线) ----
+                    const yJudgeScale = chart.scales.yJudge || chart.scales.y;
+                    const yZero = yJudgeScale.getPixelForValue(0);
+                    if (yZero >= yAxis.top && yZero <= yAxis.bottom) {
+                        ctx2.setLineDash([]);
+                        ctx2.lineWidth = 2;
+                        ctx2.strokeStyle = 'rgba(0, 0, 0, 0.25)';
+                        ctx2.beginPath();
+                        ctx2.moveTo(xAxis.left, yZero);
+                        ctx2.lineTo(xAxis.right, yZero);
+                        ctx2.stroke();
+
+                        ctx2.font = 'bold 11px sans-serif';
+                        ctx2.fillStyle = '#888';
+                        ctx2.textAlign = 'right';
+                        ctx2.fillText('Critical (0ms)', xAxis.right - 4, yZero - 4);
+
+                        ctx2.font = '10px sans-serif';
+                        ctx2.fillStyle = 'rgba(239, 68, 68, 0.5)';
+                        ctx2.textAlign = 'left';
+                        ctx2.fillText('← Fast', xAxis.left + 4, Math.min(yZero + 14, yAxis.bottom - 2));
+
+                        ctx2.fillStyle = 'rgba(245, 158, 11, 0.5)';
+                        ctx2.fillText('← Late', xAxis.left + 4, Math.max(yZero - 6, yAxis.top + 12));
+                    }
+
+                    // ---- FRAME 垂直线 ----
+                    if (frameMarkers.length) {
+                        ctx2.setLineDash([3, 5]);
+                        ctx2.lineWidth = 1;
+                        ctx2.strokeStyle = 'rgba(148, 163, 184, 0.4)';
+                        ctx2.font = '9px sans-serif';
+                        ctx2.fillStyle = 'rgba(148, 163, 184, 0.5)';
+                        ctx2.textAlign = 'center';
+
+                        const maxLines = Math.min(frameMarkers.length, 50);
+                        const step = Math.max(1, Math.floor(frameMarkers.length / maxLines));
+                        for (let i = 0; i < frameMarkers.length; i += step) {
+                            const x = xAxis.getPixelForValue(frameMarkers[i]);
+                            if (x < xAxis.left || x > xAxis.right) continue;
+                            ctx2.beginPath();
+                            ctx2.moveTo(x, yAxis.top);
+                            ctx2.lineTo(x, yAxis.bottom);
+                            ctx2.stroke();
+                            const frame = filteredFrame.find(f => Math.abs(f.wallSec - frameMarkers[i]) < 0.01);
+                            if (frame) {
+                                ctx2.fillText(`F${frame.frameNum}`, x, yAxis.bottom - 3);
+                            }
+                        }
+                    }
+                    ctx2.restore();
+                }
+            };
+
+            Chart.register(frameLinePlugin);
+
+            chartInstance = new Chart(ctx, {
+                type: 'line',
+                data: { labels, datasets },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    animation: false,
+                    normalized: true,
+                    spanGaps: true,
+                    interaction: {
+                        mode: 'index',
+                        intersect: false
+                    },
+                    plugins: {
+                        tooltip: {
+                            callbacks: {
+                                afterBody: function (tooltipItems) {
+                                    const index = tooltipItems[0].dataIndex;
+                                    let lines = [];
+
+                                    const wallSec = labels[index];
+                                    const wall = getWallTimeBySec(wallSec);
+                                    if (wall) lines.push(`Wall: ${wall}`);
+
+                                    if (allFrameData.length > 0) {
+                                        let nearest = allFrameData.reduce((a, b) =>
+                                            Math.abs(a.wallSec - wallSec) < Math.abs(b.wallSec - wallSec) ? a : b
+                                        );
+                                        if (Math.abs(nearest.wallSec - wallSec) < 1.0) {
+                                            lines.push(`Frame #${nearest.frameNum} (Unity:${nearest.unityTime.toFixed(3)}s)`);
+                                        }
+                                    }
+
+                                    const currentItem = filteredHW[index];
+                                    if (currentItem) {
+                                        lines.push(``);
+                                        lines.push(`PhyCh: ${currentItem.ch}  Block: ${currentItem.block}`);
+                                        lines.push(`Raw 多帧对比 (当前: ${currentItem.raw}):`);
+                                        for (let i = 1; i <= 6; i++) {
+                                            if (index - i >= 0) {
+                                                const prev = filteredHW[index - i];
+                                                const d = currentItem.raw - prev.raw;
+                                                lines.push(`  -${i}fr: ${d > 0 ? '+' : ''}${d} (Raw: ${prev.raw})`);
+                                            } else {
+                                                lines.push(`  -${i}fr: -- (无数据)`);
+                                            }
+                                        }
+                                    }
+
+                                    const jLabel = judgeLabels[index];
+                                    if (jLabel) {
+                                        lines.push(`-----------------------`);
+                                        lines.push(`JUDGE: ${jLabel}`);
+                                    }
+
+                                    return lines;
+                                }
+                            }
+                        },
+                        legend: {
+                            labels: {
+                                filter: function(item) {
+                                    // 若判定隐藏，不显示 JUDGE 图例
+                                    if (!showJudge && item.text.startsWith('JUDGE')) return false;
+                                    return true;
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        x: {
+                            title: { display: true, text: '时间 (秒)' },
+                            ticks: {
+                                maxTicksLimit: 20,
+                                callback: function (value) {
+                                    return Number(value).toFixed(1) + 's';
+                                }
+                            }
+                        },
+                        y: {
+                            type: 'linear',
+                            display: true,
+                            position: 'left',
+                            title: { display: true, text: 'Raw / Base' }
+                        },
+                        yDiff: {
+                            type: 'linear',
+                            display: true,
+                            position: 'right',
+                            title: { display: true, text: 'Diff / Deriv' },
+                            grid: { drawOnChartArea: false }
+                        },
+                        yStat: {
+                            type: 'linear',
+                            display: true,
+                            position: 'right',
+                            title: { display: true, text: 'Stat (0/1)' },
+                            min: -0.5,
+                            max: 1.5,
+                            grid: { drawOnChartArea: false }
+                        },
+                        yJudge: {
+                            type: 'linear',
+                            display: true,
+                            position: 'right',
+                            title: { display: true, text: '判定时间差 ms' },
+                            grid: { drawOnChartArea: false }
+                        }
+                    }
+                },
+                plugins: [frameLinePlugin]
+            });
+        }
+
+        function buildJudgeOnlyChart(filteredJudge, filteredFrame, showJudge, targetZone, startSec, endSec) {
+            chartTitle.textContent = `通道 [${targetZone}] - 判定时间轴`;
+
+            if (!showJudge || filteredJudge.length === 0) {
+                if (chartInstance) chartInstance.destroy();
+                chartInstance = null;
+                return;
+            }
+
+            const frameMarkers = filteredFrame.map(f => f.wallSec);
+
+            // 判定数据：每个点 {x: wallSec, y: diffMsec}
+            const judgePoints = filteredJudge.map(j => ({
+                x: j.wallSec,
+                y: j.diffMsec,
+                timing: j.timing,
+                noteType: j.noteType,
+                diffMsec: j.diffMsec,
+                frameNum: j.frameNum,
+                wallTime: j.wallTime
+            }));
+
+            // 按类别分 5 个数据集
+            const categories = ['Critical', 'Perfect', 'Great', 'Good', 'Miss'];
+            const datasets = categories.map(cat => {
+                const color = getJudgeColor(cat);
+                const points = judgePoints.filter(j => {
+                    const s = getSimplifiedTiming(j.timing);
+                    return s.cat === cat;
+                });
+                return {
+                    label: cat,
+                    data: points.map(p => ({ x: p.x, y: p.y })),
+                    backgroundColor: color,
+                    borderColor: color,
+                    pointRadius: 5,
+                    pointHoverRadius: 8,
+                    showLine: false,
+                    yAxisID: 'y'
+                };
+            });
+
+            const ctx = document.getElementById('dataChart').getContext('2d');
+
+            const frameLinePlugin = {
+                id: 'frameLines',
+                afterDraw(chart) {
+                    const ctx2 = chart.ctx;
+                    const xAxis = chart.scales.x;
+                    const yAxis = chart.scales.y;
+                    ctx2.save();
+
+                    // ---- y=0 基准线 (Critical 分界线) ----
+                    const yJudgeScale = chart.scales.yJudge || chart.scales.y;
+                    const yZero = yJudgeScale.getPixelForValue(0);
+                    if (yZero >= yAxis.top && yZero <= yAxis.bottom) {
+                        ctx2.setLineDash([]);
+                        ctx2.lineWidth = 2;
+                        ctx2.strokeStyle = 'rgba(0, 0, 0, 0.25)';
+                        ctx2.beginPath();
+                        ctx2.moveTo(xAxis.left, yZero);
+                        ctx2.lineTo(xAxis.right, yZero);
+                        ctx2.stroke();
+
+                        ctx2.font = 'bold 11px sans-serif';
+                        ctx2.fillStyle = '#888';
+                        ctx2.textAlign = 'right';
+                        ctx2.fillText('Critical (0ms)', xAxis.right - 4, yZero - 4);
+
+                        ctx2.font = '10px sans-serif';
+                        ctx2.fillStyle = 'rgba(239, 68, 68, 0.5)';
+                        ctx2.textAlign = 'left';
+                        ctx2.fillText('← Fast', xAxis.left + 4, Math.min(yZero + 14, yAxis.bottom - 2));
+
+                        ctx2.fillStyle = 'rgba(245, 158, 11, 0.5)';
+                        ctx2.fillText('← Late', xAxis.left + 4, Math.max(yZero - 6, yAxis.top + 12));
+                    }
+
+                    // ---- FRAME 垂直线 ----
+                    if (frameMarkers.length) {
+                        ctx2.setLineDash([3, 5]);
+                        ctx2.lineWidth = 1;
+                        ctx2.strokeStyle = 'rgba(148, 163, 184, 0.4)';
+                        ctx2.font = '9px sans-serif';
+                        ctx2.fillStyle = 'rgba(148, 163, 184, 0.5)';
+                        ctx2.textAlign = 'center';
+
+                        const maxLines = Math.min(frameMarkers.length, 50);
+                        const step = Math.max(1, Math.floor(frameMarkers.length / maxLines));
+                        for (let i = 0; i < frameMarkers.length; i += step) {
+                            const x = xAxis.getPixelForValue(frameMarkers[i]);
+                            if (x < xAxis.left || x > xAxis.right) continue;
+                            ctx2.beginPath();
+                            ctx2.moveTo(x, yAxis.top);
+                            ctx2.lineTo(x, yAxis.bottom);
+                            ctx2.stroke();
+                            const frame = filteredFrame.find(f => Math.abs(f.wallSec - frameMarkers[i]) < 0.01);
+                            if (frame) {
+                                ctx2.fillText(`F${frame.frameNum}`, x, yAxis.bottom - 3);
+                            }
+                        }
+                    }
+                    ctx2.restore();
+                }
+            };
+
+            Chart.register(frameLinePlugin);
+
+            chartInstance = new Chart(ctx, {
+                type: 'scatter',
+                data: { datasets },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    animation: false,
+                    plugins: {
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    const raw = context.raw;
+                                    const j = judgePoints.find(p => Math.abs(p.x - raw.x) < 0.01 && Math.abs(p.y - raw.y) < 0.01);
+                                    if (j) {
+                                        const s = getSimplifiedTiming(j.timing);
+                                        const dirLabel = s.dir ? ` (${s.dir})` : '';
+                                        let txt = `${j.noteType} ${s.cat}${dirLabel} ${j.diffMsec >= 0 ? '+' : ''}${j.diffMsec.toFixed(2)}ms [${j.wallTime}]`;
+                                        if (j.frameNum !== undefined) txt += ` | Frame:${j.frameNum}`;
+                                        return txt;
+                                    }
+                                    return `${raw.y.toFixed(2)}ms`;
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        x: {
+                            type: 'linear',
+                            position: 'bottom',
+                            title: { display: true, text: '时间 (秒)' },
+                            ticks: {
+                                maxTicksLimit: 20,
+                                callback: function (value) {
+                                    return Number(value).toFixed(1) + 's';
+                                }
+                            }
+                        },
+                        y: {
+                            type: 'linear',
+                            title: { display: true, text: '判定时间差 (ms)' }
+                        }
+                    }
+                },
+                plugins: [frameLinePlugin]
+            });
+        }
+
+        copyBtn.addEventListener('click', () => {
+            rawDataDisplay.select();
+            document.execCommand('copy');
+            const originalText = copyBtn.innerText;
+            copyBtn.innerText = '✅ 复制成功!';
+            setTimeout(() => { copyBtn.innerText = originalText; }, 2000);
+        });
+
+        renderSavedViews();
+    </script>
+</body>
+
+</html>
