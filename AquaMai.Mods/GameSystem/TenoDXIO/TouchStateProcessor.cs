@@ -236,6 +236,9 @@ namespace AquaMai.Mods.GameSystem
             private int up = 0;
             private bool lock_releasing = false;
             private bool edge_holding = false;
+            private bool edge_armed = false;
+            private int edge_cooldown = 0;
+            private int edge_prev_deriv = 0;
 
             private int[] history_16 = new int[16];
             private int history_idx = 0;
@@ -248,6 +251,9 @@ namespace AquaMai.Mods.GameSystem
                 up = 0;
                 lock_releasing = false;
                 edge_holding = false;
+                edge_armed = false;
+                edge_cooldown = 0;
+                edge_prev_deriv = 0;
                 Array.Clear(history_16, 0, 16);
                 history_idx = 0;
                 history_filled = false;
@@ -282,95 +288,182 @@ namespace AquaMai.Mods.GameSystem
 
                 if (block == 'A') // === 组 0 ===
                 {
-                    on = is_pressed;
+                    int zoneNum = zoneInfo.number;
+                    bool isEdgeA = (zoneNum >= 2 && zoneNum <= 5);
 
-                    int customDiff = override_A[physicalChannel];
-                    int on_default_diff = (customDiff != -1) ? customDiff : TenoDXIO.TriggerSensitivity;
-
-                    bool is_fast_edge_strike = (diff_deriv >= TenoDXIO.EdgeTriggerDeriv) && (diff >= TenoDXIO.EdgeTriggerMinDiff);
-
-                    if (is_fast_edge_strike)
+                    if (isEdgeA)
                     {
-                        edge_holding = true;
-                    }
-                    else if (diff < TenoDXIO.EdgeTriggerMinDiff - 50 || !is_pressed)
-                    {
-                        edge_holding = false;
-                    }
+                        // ===== v2 Armed+Impact 边缘算法 (A2/A3/A4/A5) =====
+                        // 边缘区域信号弱 (Diff 200-500), Deriv 可能仅 6-38
+                        // 双通道检测: Deriv预武装 + Delta-Diff增量武装
+                        int armSpeed = TenoDXIO.EdgeArmSpeed;
+                        int edgeDelta = TenoDXIO.EdgeDeltaArm;
+                        int customMinDiff = override_A[physicalChannel];
+                        int minDiff = (customMinDiff != -1) ? customMinDiff : TenoDXIO.EdgeMinDiff;
+                        int impactSpd = TenoDXIO.ImpactSpeedCap;
 
-                    if (diff > on_default_diff + 400 || diff < on_default_diff - 400) up = 0;
+                        // 边缘区域自动放宽急刹车 (边缘d2仅 -20~-200, 中心 -100~-1500)
+                        int impactAccel = TenoDXIO.ImpactAccel;
+                        if (impactAccel < -45) impactAccel = -45;
 
-                    int on_diff = on_default_diff;
+                        // d2 = 二阶导 (当前 Deriv - 上一帧 Deriv)
+                        int d2 = diff_deriv - edge_prev_deriv;
+                        edge_prev_deriv = diff_deriv;
 
-                    int last_diff = GetHistory(0) - setup_raw;
-                    if (last_diff < on_default_diff && diff >= on_default_diff) up = 1;
-                    else if (last_diff >= on_default_diff && diff < on_default_diff) up = -1;
+                        // delta_diff = 跨帧 Diff 跳变 = diff_deriv (base抵消)
+                        int deltaDiff = diff_deriv;
 
-                    switch (up)
-                    {
-                        case 0: on_diff = on_default_diff; break;
-                        case 1: on_diff = TenoDXIO.HoldThreshold; break;
-                        case -1: on_diff = 800; break;
-                    }
+                        // 冷却递减
+                        if (edge_cooldown > 0) edge_cooldown--;
 
-                    if (edge_holding)
-                    {
-                        on_diff = Math.Min(on_diff, TenoDXIO.EdgeTriggerMinDiff);
-                    }
+                        if (!is_pressed)
+                        {
+                            on = false;
 
-                    int absolute_safe_diff = TenoDXIO.QuickReleaseLine;
+                            if (edge_cooldown == 0)
+                            {
+                                // 1. Deriv 预武装
+                                if (diff_deriv > armSpeed) edge_armed = true;
 
-                    if (diff < 200) lock_releasing = false;
+                                // 2. Delta-Diff 增量武装 (跨帧跳变)
+                                if (deltaDiff > edgeDelta) edge_armed = true;
 
-                    if ((lock_releasing && diff_deriv > 150 && diff > on_diff) || diff > on_diff * 1.5 || is_fast_edge_strike)
-                    {
-                        lock_releasing = false;
-                    }
+                                // 3. 撞击确认 (双通道)
+                                if (edge_armed && diff > minDiff)
+                                {
+                                    // 通道A: 标准急刹车 (d2急刹车特征)
+                                    // diff_deriv >= -20 守卫: 排除手指离开的负向信号被误判为急刹车
+                                    if (d2 < impactAccel && diff_deriv >= -20 && diff_deriv < impactSpd)
+                                    {
+                                        on = true;
+                                        edge_armed = false;
+                                        edge_cooldown = 0;
+                                    }
+                                    // 通道B: 增量跳变确认 (无需d2, 跳变本身隐含到达)
+                                    // 仅当信号仍在增长时确认 (deltaDiff>0隐含diff_deriv为正)
+                                    else if (deltaDiff > edgeDelta && diff_deriv < impactSpd)
+                                    {
+                                        on = true;
+                                        edge_armed = false;
+                                        edge_cooldown = 0;
+                                    }
+                                }
 
-                    if ((diff_deriv > 150 && diff > on_diff) || diff > on_diff * 1.5 || is_fast_edge_strike)
-                    {
-                        lock_releasing = false;
-                        diff_deriv_down_count = 0;
-                    }
-
-                    if (diff > on_diff || is_fast_edge_strike)
-                    {
-                        if (diff_deriv_down_count > 0) diff_deriv_down_count--;
-                        else if (lock_releasing) { }
+                                // 4. 防错解除武装
+                                if (edge_armed && diff_deriv < 40 && d2 >= -50)
+                                {
+                                    edge_armed = false;
+                                }
+                            }
+                        }
                         else
                         {
-                            if (!is_pressed && diff_deriv < TenoDXIO.HoverSpeedMax && diff < TenoDXIO.HoverDiffMax && !is_fast_edge_strike) { }
-                            else on = true;
+                            // 5. 释放判定
+                            if (diff_deriv < TenoDXIO.EdgeFastLift || diff < TenoDXIO.EdgeSafeRelease)
+                            {
+                                on = false;
+                                edge_armed = false;
+                                edge_cooldown = 2;  // 2帧冷却防立即重武装
+                            }
+                            else
+                            {
+                                on = true;
+                            }
                         }
                     }
                     else
                     {
-                        if (diff_deriv_down_count > 0) diff_deriv_down_count--;
-                        if (is_pressed && diff > 200) lock_releasing = true;
-                        on = false;
-                    }
+                        // ===== 原中心区算法 (A1/A6/A7/A8) =====
+                        on = is_pressed;
 
-                    int deriv_down = TenoDXIO.FastLiftSpeed;
-                    int last3_diff = GetHistory(2) - setup_raw;
+                        int customDiff = override_A[physicalChannel];
+                        int on_default_diff = (customDiff != -1) ? customDiff : TenoDXIO.TriggerSensitivity;
 
-                    if (last3_diff > 2700) deriv_down = -400;
+                        bool is_fast_edge_strike = (diff_deriv >= TenoDXIO.EdgeTriggerDeriv) && (diff >= TenoDXIO.EdgeTriggerMinDiff);
 
-                    if (diff_deriv < deriv_down || diff_deriv_2 < deriv_down * 1.5 || diff_deriv_3 < deriv_down * 2)
-                    {
-                        if (diff_deriv < -800 || diff_deriv_2 < -1200 || diff_deriv_3 < -1500)
+                        if (is_fast_edge_strike)
                         {
-                            if (diff < 1000)
+                            edge_holding = true;
+                        }
+                        else if (diff < TenoDXIO.EdgeTriggerMinDiff - 50 || !is_pressed)
+                        {
+                            edge_holding = false;
+                        }
+
+                        if (diff > on_default_diff + 400 || diff < on_default_diff - 400) up = 0;
+
+                        int on_diff = on_default_diff;
+
+                        int last_diff = GetHistory(0) - setup_raw;
+                        if (last_diff < on_default_diff && diff >= on_default_diff) up = 1;
+                        else if (last_diff >= on_default_diff && diff < on_default_diff) up = -1;
+
+                        switch (up)
+                        {
+                            case 0: on_diff = on_default_diff; break;
+                            case 1: on_diff = TenoDXIO.HoldThreshold; break;
+                            case -1: on_diff = 800; break;
+                        }
+
+                        if (edge_holding)
+                        {
+                            on_diff = Math.Min(on_diff, TenoDXIO.EdgeTriggerMinDiff);
+                        }
+
+                        int absolute_safe_diff = TenoDXIO.QuickReleaseLine;
+
+                        if (diff < 200) lock_releasing = false;
+
+                        if ((lock_releasing && diff_deriv > 150 && diff > on_diff) || diff > on_diff * 1.5 || is_fast_edge_strike)
+                        {
+                            lock_releasing = false;
+                        }
+
+                        if ((diff_deriv > 150 && diff > on_diff) || diff > on_diff * 1.5 || is_fast_edge_strike)
+                        {
+                            lock_releasing = false;
+                            diff_deriv_down_count = 0;
+                        }
+
+                        if (diff > on_diff || is_fast_edge_strike)
+                        {
+                            if (diff_deriv_down_count > 0) diff_deriv_down_count--;
+                            else if (lock_releasing) { }
+                            else
+                            {
+                                if (!is_pressed && diff_deriv < TenoDXIO.HoverSpeedMax && diff < TenoDXIO.HoverDiffMax && !is_fast_edge_strike) { }
+                                else on = true;
+                            }
+                        }
+                        else
+                        {
+                            if (diff_deriv_down_count > 0) diff_deriv_down_count--;
+                            if (is_pressed && diff > 200) lock_releasing = true;
+                            on = false;
+                        }
+
+                        int deriv_down = TenoDXIO.FastLiftSpeed;
+                        int last3_diff = GetHistory(2) - setup_raw;
+
+                        if (last3_diff > 2700) deriv_down = -400;
+
+                        if (diff_deriv < deriv_down || diff_deriv_2 < deriv_down * 1.5 || diff_deriv_3 < deriv_down * 2)
+                        {
+                            if (diff_deriv < -800 || diff_deriv_2 < -1200 || diff_deriv_3 < -1500)
+                            {
+                                if (diff < 1000)
+                                {
+                                    on = false;
+                                    diff_deriv_down_count = 3;
+                                    if (diff > 500) lock_releasing = true;
+                                }
+                            }
+                            else if (diff < absolute_safe_diff)
                             {
                                 on = false;
                                 diff_deriv_down_count = 3;
-                                if (diff > 500) lock_releasing = true;
+                                if (diff > 200) lock_releasing = true;
                             }
-                        }
-                        else if (diff < absolute_safe_diff)
-                        {
-                            on = false;
-                            diff_deriv_down_count = 3;
-                            if (diff > 200) lock_releasing = true;
                         }
                     }
                 }
