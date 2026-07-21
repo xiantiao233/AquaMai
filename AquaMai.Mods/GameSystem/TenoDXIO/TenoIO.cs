@@ -158,21 +158,26 @@ namespace AquaMai.Mods.GameSystem
         [ConfigEntry("A区 - 边缘突变触发最低形变(Diff)", "满足突变时所需的最低Diff防噪线。默认 200")]
         public static int EdgeTriggerMinDiff = 300;
 
-        // ================= A区v2 Armed+Impact 边缘算法参数 (A2/A3/A4/A5) =================
-        [ConfigEntry("A区边缘 - Deriv预武装速度", "边缘区域: Deriv>此值进入预武装。默认 50 (原35过低,蹭区块易武装)")]
-        public static int EdgeArmSpeed = 50;
-        [ConfigEntry("A区边缘 - 帧间增量跳变武装", "边缘区域: 跨帧Diff跳变>此值触发增量武装。默认 120 (原80过低,噪声易触发)")]
-        public static int EdgeDeltaArm = 120;
-        [ConfigEntry("A区边缘 - 最小触控信号", "边缘区域: 撞击确认所需最小Diff。默认 120 (原60过低,蹭区块在阈值内)")]
-        public static int EdgeMinDiff = 120;
-        [ConfigEntry("A区边缘 - 极速抽离释放", "边缘区域: Deriv<此值时释放。默认 -40")]
-        public static int EdgeFastLift = -40;
-        [ConfigEntry("A区边缘 - 安全底线释放", "边缘区域: Diff<此值时强制释放。默认 100 (原60过低,易残留)")]
-        public static int EdgeSafeRelease = 100;
-        [ConfigEntry("A区 - 撞击确认急刹车阈值", "二阶导d2阈值: 中心=-60, 边缘自动放宽至max(-45,该值)。默认 -60")]
-        public static int ImpactAccel = -60;
-        [ConfigEntry("A区 - 撞击确认残速上限", "撞击时Deriv上限, Deriv>此值说明手指仍在运动未停稳。默认 120")]
-        public static int ImpactSpeedCap = 120;
+        // ================= A区v2 Armed+Impact 边缘覆盖参数 (仅A2/A3/A4/A5) =================
+        // 设为 "不启用" 值(0)时, 自动从上方A区中心参数等比推算:
+        //   minDiff=0 → TriggerSensitivity/4 (650→162)
+        //   safeRelease=0 → HoldThreshold/3 (450→150)
+        //   fastLift=0 → FastLiftSpeed/6 (-250→-41)
+        // armSpeed / edgeDelta 无中心对应, 设为0时使用硬编码默认(70/160)
+        [ConfigEntry("A区边缘 - Deriv预武装速度", "设为0用默认70。真实边缘按下Deriv=72~326, 悬空Deriv<60")]
+        public static int EdgeArmSpeed = 70;
+        [ConfigEntry("A区边缘 - 帧间增量跳变武装", "设为0用默认160。跨帧跳变>此值武装, 悬空>120几乎不可能")]
+        public static int EdgeDeltaArm = 160;
+        [ConfigEntry("A区边缘 - 最小触控信号", "设为0时=TriggerSensitivity/4。悬空Diff<150,该线拦掉所有虚空")]
+        public static int EdgeMinDiff = 180;
+        [ConfigEntry("A区边缘 - 极速抽离释放", "设为0时=FastLiftSpeed/6。Deriv<此值快速释放, 防止黏键")]
+        public static int EdgeFastLift = -35;
+        [ConfigEntry("A区边缘 - 安全底线释放", "设为0时=HoldThreshold/3。Diff<此值强制释放, 兜底断后路")]
+        public static int EdgeSafeRelease = 150;
+        [ConfigEntry("A区 - 撞击确认急刹车阈值", "d2阈值,边缘自动放宽至max(-55,该值)。默认 -65")]
+        public static int ImpactAccel = -65;
+        [ConfigEntry("A区 - 撞击确认残速上限", "撞击时Deriv<此值才确认, 手指必须停稳。默认 100")]
+        public static int ImpactSpeedCap = 100;
 
         // ================= C区 判定参数 =================
         [ConfigEntry("C区 - Diff 触发线", "默认 25")]

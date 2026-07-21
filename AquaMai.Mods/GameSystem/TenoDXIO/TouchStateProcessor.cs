@@ -294,17 +294,35 @@ namespace AquaMai.Mods.GameSystem
                     if (isEdgeA)
                     {
                         // ===== v2 Armed+Impact 边缘算法 (A2/A3/A4/A5) =====
-                        // 边缘区域信号弱 (Diff 200-500), Deriv 可能仅 6-38
-                        // 双通道检测: Deriv预武装 + Delta-Diff增量武装
-                        int armSpeed = TenoDXIO.EdgeArmSpeed;
-                        int edgeDelta = TenoDXIO.EdgeDeltaArm;
-                        int customMinDiff = override_A[physicalChannel];
-                        int minDiff = (customMinDiff != -1) ? customMinDiff : TenoDXIO.EdgeMinDiff;
-                        int impactSpd = TenoDXIO.ImpactSpeedCap;
+                        // 配置级联链: 逐通道覆盖 → 边缘专用参数 → A区中心参数等比推算
+                        // 边缘真实: Diff=200~500, Deriv=72~326, d2=-20~-200
 
-                        // 边缘区域自动放宽急刹车 (边缘d2仅 -20~-200, 中心 -100~-1500)
+                        // Arm/Delta: 无中心对应, 直接读边缘配置(0=硬编码默认)
+                        int armSpeed  = TenoDXIO.EdgeArmSpeed  > 0 ? TenoDXIO.EdgeArmSpeed  : 70;
+                        int edgeDelta = TenoDXIO.EdgeDeltaArm > 0 ? TenoDXIO.EdgeDeltaArm : 160;
+
+                        // minDiff: override_A → EdgeMinDiff(>0) → TriggerSensitivity/4
+                        int customMinDiff = override_A[physicalChannel];
+                        int minDiff;
+                        if (customMinDiff != -1)
+                            minDiff = customMinDiff;
+                        else if (TenoDXIO.EdgeMinDiff > 0)
+                            minDiff = TenoDXIO.EdgeMinDiff;
+                        else
+                            minDiff = TenoDXIO.TriggerSensitivity / 4;
+
+                        // Impact: 边缘自动收紧地板 (防止急刹车条件过松)
+                        int impactSpd = TenoDXIO.ImpactSpeedCap;
                         int impactAccel = TenoDXIO.ImpactAccel;
-                        if (impactAccel < -45) impactAccel = -45;
+                        if (impactAccel < -55) impactAccel = -55;
+
+                        // Release: edge专用 → center等比推算
+                        int fastRel = TenoDXIO.EdgeFastLift != 0
+                            ? TenoDXIO.EdgeFastLift
+                            : TenoDXIO.FastLiftSpeed / 6;
+                        int safeRel = TenoDXIO.EdgeSafeRelease > 0
+                            ? TenoDXIO.EdgeSafeRelease
+                            : TenoDXIO.HoldThreshold / 3;
 
                         // d2 = 二阶导 (当前 Deriv - 上一帧 Deriv)
                         int d2 = diff_deriv - edge_prev_deriv;
@@ -322,8 +340,8 @@ namespace AquaMai.Mods.GameSystem
 
                             if (edge_cooldown == 0)
                             {
-                                // 1. Deriv 预武装
-                                if (diff_deriv > armSpeed) edge_armed = true;
+                                // 1. Deriv 预武装 (上限400截断: 防止异常噪声尖刺)
+                                if (diff_deriv > armSpeed && diff_deriv < 400) edge_armed = true;
 
                                 // 2. Delta-Diff 增量武装 (跨帧跳变)
                                 if (deltaDiff > edgeDelta) edge_armed = true;
@@ -331,16 +349,14 @@ namespace AquaMai.Mods.GameSystem
                                 // 3. 撞击确认 (双通道)
                                 if (edge_armed && diff > minDiff)
                                 {
-                                    // 通道A: 标准急刹车 (d2急刹车特征)
-                                    // diff_deriv >= -20 守卫: 排除手指离开的负向信号被误判为急刹车
+                                    // 通道A: 标准急刹车 (d2急刹车 + deriv>= -20排除离开 + deriv<impactSpd停稳)
                                     if (d2 < impactAccel && diff_deriv >= -20 && diff_deriv < impactSpd)
                                     {
                                         on = true;
                                         edge_armed = false;
                                         edge_cooldown = 0;
                                     }
-                                    // 通道B: 增量跳变确认 (无需d2, 跳变本身隐含到达)
-                                    // 仅当信号仍在增长时确认 (deltaDiff>0隐含diff_deriv为正)
+                                    // 通道B: 增量跳变确认 (无需d2, 跳变隐含到达, 但deriv必须已停稳)
                                     else if (deltaDiff > edgeDelta && diff_deriv < impactSpd)
                                     {
                                         on = true;
@@ -349,8 +365,8 @@ namespace AquaMai.Mods.GameSystem
                                     }
                                 }
 
-                                // 4. 防错解除武装
-                                if (edge_armed && diff_deriv < 40 && d2 >= -50)
+                                // 4. 防错解除武装 (deriv下降+无急刹车 → 是悬空/蹭动, 解除)
+                                if (edge_armed && diff_deriv < 40 && d2 >= -55)
                                 {
                                     edge_armed = false;
                                 }
@@ -359,11 +375,11 @@ namespace AquaMai.Mods.GameSystem
                         else
                         {
                             // 5. 释放判定
-                            if (diff_deriv < TenoDXIO.EdgeFastLift || diff < TenoDXIO.EdgeSafeRelease)
+                            if (diff_deriv < fastRel || diff < safeRel)
                             {
                                 on = false;
                                 edge_armed = false;
-                                edge_cooldown = 2;  // 2帧冷却防立即重武装
+                                edge_cooldown = 2;
                             }
                             else
                             {
