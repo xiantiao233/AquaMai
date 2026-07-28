@@ -141,32 +141,34 @@ namespace AquaMai.Mods.GameSystem
         public static int ClockOutlineWidth = 3;
 
         // ================= A区 累积-导数双鉴算法参数 =================
-        [ConfigEntry("A区 - 大信号直通阈值", "diff >= 此值时直接判定为触发，不经过累积算法。默认 700")]
+        [ConfigEntry("A区 - 大信号直通阈值", "diff >= 此值时进入大信号通道。默认 700")]
         public static int TriggerSensitivity = 700;
-        [ConfigEntry("A区 - 累积窗口大小", "滑动窗口帧数，用于计算累积均值。默认 8")]
+        [ConfigEntry("A区 - 大信号门控帧数", "设为1可在diff首次跨过700时延迟1帧确认，防止信号爬升阶段的提前判定。默认 0(关闭)")]
+        public static int LargeSignalGate = 0;
+        [ConfigEntry("A区 - 累积窗口大小", "滑动窗口帧数。默认 8")]
         public static int WindowSize = 8;
-        [ConfigEntry("A区 - 触发比例阈值", "spike_ratio = diff / cum_avg > 此值，说明当前信号突发。默认 1.7")]
-        public static float TriggerRatio = 1.7f;
-        [ConfigEntry("A区 - 触发导数阈值", "deriv > 此值，说明上升沿足够陡峭。默认 24")]
-        public static int TriggerDeriv = 24;
+        [ConfigEntry("A区 - 触发比例阈值", "spike_ratio = diff / cum_avg > 此值。默认 1.8")]
+        public static float TriggerRatio = 1.8f;
+        [ConfigEntry("A区 - 触发导数阈值", "deriv > 此值。默认 28")]
+        public static int TriggerDeriv = 28;
         [ConfigEntry("A区 - 触发最小Diff", "diff > 此值，过滤噪声。默认 55")]
         public static int TriggerDiffMin = 55;
-        [ConfigEntry("A区 - 确认超时帧数", "确认阶段超时帧数。默认 8")]
-        public static int ConfirmFrames = 8;
-        [ConfigEntry("A区 - 确认Diff阈值", "diff 突破此值后进入崩溃观察期。默认 150")]
-        public static int ConfirmDiff = 150;
+        [ConfigEntry("A区 - 确认超时帧数", "pending 阶段超时帧数。默认 10")]
+        public static int ConfirmFrames = 10;
+        [ConfigEntry("A区 - 确认Diff阈值", "diff 突破此值进入崩溃观察。默认 200")]
+        public static int ConfirmDiff = 200;
         [ConfigEntry("A区 - 释放硬下限", "释放阈值不会低于此值。默认 35")]
         public static int ReleaseFloor = 35;
-        [ConfigEntry("A区 - 动态释放比例", "释放阈值 = max(floor, peak * ratio)。默认 0.35")]
-        public static float ReleaseRatio = 0.35f;
-        [ConfigEntry("A区 - 快速释放导数", "deriv < 此值时立即释放。默认 -28")]
-        public static int SharpReleaseDeriv = -28;
-        [ConfigEntry("A区 - 崩溃观察窗口", "崩溃观察帧数，观察期满无崩溃才确认按压。默认 5")]
-        public static int CrashWindow = 5;
-        [ConfigEntry("A区 - 崩溃导数阈值", "观察期内 deriv 低于此值且 diff 低于CrashDiffThreshold则判定为悬空取消。默认 -15")]
-        public static int CrashDerivThreshold = -15;
-        [ConfigEntry("A区 - 崩溃Diff阈值", "崩溃判定配合使用的 diff 上限。默认 220")]
-        public static int CrashDiffThreshold = 220;
+        [ConfigEntry("A区 - 动态释放比例", "释放阈值 = max(floor, peak * ratio)。默认 0.25")]
+        public static float ReleaseRatio = 0.25f;
+        [ConfigEntry("A区 - 快速释放导数", "deriv < 此值时立即释放。默认 -40")]
+        public static int SharpReleaseDeriv = -40;
+        [ConfigEntry("A区 - 崩溃观察窗口", "崩溃观察帧数。默认 7")]
+        public static int CrashWindow = 7;
+        [ConfigEntry("A区 - 崩溃导数阈值", "观察期内 deriv 低于此值且 diff 低于CrashDiffThreshold则判定悬空取消。默认 -8")]
+        public static int CrashDerivThreshold = -8;
+        [ConfigEntry("A区 - 崩溃Diff阈值", "崩溃判定配合使用的 diff 上限。默认 280")]
+        public static int CrashDiffThreshold = 280;
 
         // ================= C区 判定参数 =================
         [ConfigEntry("C区 - Diff 触发线", "默认 25")]

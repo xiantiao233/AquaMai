@@ -241,6 +241,7 @@ namespace AquaMai.Mods.GameSystem
             private int a_confirm_cnt = 0;
             private bool a_observing = false;
             private int a_observe_cnt = 0;
+            private int a_large_gate = 0;    // large signal gate counter
 
             private int[] history_16 = new int[16];
             private int history_idx = 0;
@@ -256,6 +257,7 @@ namespace AquaMai.Mods.GameSystem
                 a_confirm_cnt = 0;
                 a_observing = false;
                 a_observe_cnt = 0;
+                a_large_gate = 0;
                 Array.Clear(history_16, 0, 16);
                 history_idx = 0;
                 history_filled = false;
@@ -296,14 +298,38 @@ namespace AquaMai.Mods.GameSystem
                     // 结合一阶导数，辨别真实边缘触摸和悬空晃动
                     // ==========================================
 
-                    // 大信号直通：diff >= TriggerSensitivity 直接触发
+                    // 大信号通道：diff >= TriggerSensitivity 进入门控确认
                     int largeDiffThresh = override_A[physicalChannel] != -1 ? override_A[physicalChannel] : TenoDXIO.TriggerSensitivity;
 
                     if (diff >= largeDiffThresh)
                     {
-                        on = true;
-                        a_max_diff = Math.Max(a_max_diff, diff);
-                        a_observing = false;
+                        if (!is_pressed && a_large_gate < TenoDXIO.LargeSignalGate)
+                        {
+                            a_large_gate++;
+                            on = false;
+                        }
+                        else
+                        {
+                            on = true;
+                            a_max_diff = Math.Max(a_max_diff, diff);
+                            a_observing = false;
+                            a_large_gate = 0;
+                        }
+                    }
+                    else if (a_large_gate > 0 && diff > 200)
+                    {
+                        // 门控到期，diff未崩溃则确认
+                        a_large_gate++;
+                        if (a_large_gate > TenoDXIO.LargeSignalGate)
+                        {
+                            on = true;
+                            a_max_diff = Math.Max(a_max_diff, diff);
+                            a_large_gate = 0;
+                        }
+                        else
+                        {
+                            on = false;
+                        }
                     }
                     else if (is_pressed)
                     {
@@ -383,6 +409,7 @@ namespace AquaMai.Mods.GameSystem
                     else
                     {
                         // --- 检测阶段：维护累积窗口并判断触发条件 ---
+                        a_large_gate = 0;
                         a_ring.Enqueue(diff);
                         a_ring_sum += diff;
                         if (a_ring.Count > TenoDXIO.WindowSize)
