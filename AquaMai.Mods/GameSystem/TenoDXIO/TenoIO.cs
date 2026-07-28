@@ -140,23 +140,33 @@ namespace AquaMai.Mods.GameSystem
         [ConfigEntry("UI - 时钟描边宽度", "默认 3，设为 0 则关闭描边")]
         public static int ClockOutlineWidth = 3;
 
-        // ================= A区 核心判定参数 =================
-        [ConfigEntry("A区 - 基础触发灵敏度", "Trigger Sensitivity: 默认 650")]
-        public static int TriggerSensitivity = 650;
-        [ConfigEntry("A区 - 长按防断触能力", "Hold Threshold: 默认 450")]
-        public static int HoldThreshold = 450;
-        [ConfigEntry("A区 - 连击极速抬手线", "Quick Release Line: 默认 1200")]
-        public static int QuickReleaseLine = 1200;
-        [ConfigEntry("A区 - 悬空防误触拦截(Diff)", "Hover Diff Max: 默认 1000")]
-        public static int HoverDiffMax = 1000;
-        [ConfigEntry("A区 - 悬空防误触拦截(diff_deriv)", "Hover Speed Max: 默认 15")]
-        public static int HoverSpeedMax = 15;
-        [ConfigEntry("A区 - 极速抽离灵敏度", "Fast Lift Speed: 默认 -250")]
-        public static int FastLiftSpeed = -250;
-        [ConfigEntry("A区 - 边缘突变触发速度(Deriv)", "边缘划过/轻触的突变速度阈值。默认 120")]
-        public static int EdgeTriggerDeriv = 150;
-        [ConfigEntry("A区 - 边缘突变触发最低形变(Diff)", "满足突变时所需的最低Diff防噪线。默认 200")]
-        public static int EdgeTriggerMinDiff = 300;
+        // ================= A区 累积-导数双鉴算法参数 =================
+        [ConfigEntry("A区 - 大信号直通阈值", "diff >= 此值时直接判定为触发，不经过累积算法。默认 700")]
+        public static int TriggerSensitivity = 700;
+        [ConfigEntry("A区 - 累积窗口大小", "滑动窗口帧数，用于计算累积均值。默认 8")]
+        public static int WindowSize = 8;
+        [ConfigEntry("A区 - 触发比例阈值", "spike_ratio = diff / cum_avg > 此值，说明当前信号突发。默认 1.7")]
+        public static float TriggerRatio = 1.7f;
+        [ConfigEntry("A区 - 触发导数阈值", "deriv > 此值，说明上升沿足够陡峭。默认 24")]
+        public static int TriggerDeriv = 24;
+        [ConfigEntry("A区 - 触发最小Diff", "diff > 此值，过滤噪声。默认 55")]
+        public static int TriggerDiffMin = 55;
+        [ConfigEntry("A区 - 确认超时帧数", "确认阶段超时帧数。默认 8")]
+        public static int ConfirmFrames = 8;
+        [ConfigEntry("A区 - 确认Diff阈值", "diff 突破此值后进入崩溃观察期。默认 150")]
+        public static int ConfirmDiff = 150;
+        [ConfigEntry("A区 - 释放硬下限", "释放阈值不会低于此值。默认 35")]
+        public static int ReleaseFloor = 35;
+        [ConfigEntry("A区 - 动态释放比例", "释放阈值 = max(floor, peak * ratio)。默认 0.35")]
+        public static float ReleaseRatio = 0.35f;
+        [ConfigEntry("A区 - 快速释放导数", "deriv < 此值时立即释放。默认 -28")]
+        public static int SharpReleaseDeriv = -28;
+        [ConfigEntry("A区 - 崩溃观察窗口", "崩溃观察帧数，观察期满无崩溃才确认按压。默认 5")]
+        public static int CrashWindow = 5;
+        [ConfigEntry("A区 - 崩溃导数阈值", "观察期内 deriv 低于此值且 diff 低于CrashDiffThreshold则判定为悬空取消。默认 -15")]
+        public static int CrashDerivThreshold = -15;
+        [ConfigEntry("A区 - 崩溃Diff阈值", "崩溃判定配合使用的 diff 上限。默认 220")]
+        public static int CrashDiffThreshold = 220;
 
         // ================= C区 判定参数 =================
         [ConfigEntry("C区 - Diff 触发线", "默认 25")]
@@ -216,24 +226,24 @@ namespace AquaMai.Mods.GameSystem
         {
             switch (type)
             {
-                case NotesTypeID.Def.Tap:          return "TAP";
-                case NotesTypeID.Def.Break:        return "BREAK";
-                case NotesTypeID.Def.ExTap:        return "EX_TAP";
-                case NotesTypeID.Def.Hold:         return "HOLD";
-                case NotesTypeID.Def.ExHold:       return "EX_HOLD";
-                case NotesTypeID.Def.Star:         return "STAR";
-                case NotesTypeID.Def.BreakStar:    return "BREAK_STAR";
-                case NotesTypeID.Def.ExStar:       return "EX_STAR";
-                case NotesTypeID.Def.TouchTap:     return "TOUCH_TAP";
-                case NotesTypeID.Def.TouchHold:    return "TOUCH_HOLD";
-                case NotesTypeID.Def.ExBreakTap:   return "EX_BREAK_TAP";
-                case NotesTypeID.Def.BreakHold:    return "BREAK_HOLD";
-                case NotesTypeID.Def.ExBreakHold:  return "EX_BREAK_HOLD";
-                case NotesTypeID.Def.Slide:        return "SLIDE";
-                case NotesTypeID.Def.BreakSlide:   return "BREAK_SLIDE";
-                case NotesTypeID.Def.ExSlide:      return "EX_SLIDE";
+                case NotesTypeID.Def.Tap: return "TAP";
+                case NotesTypeID.Def.Break: return "BREAK";
+                case NotesTypeID.Def.ExTap: return "EX_TAP";
+                case NotesTypeID.Def.Hold: return "HOLD";
+                case NotesTypeID.Def.ExHold: return "EX_HOLD";
+                case NotesTypeID.Def.Star: return "STAR";
+                case NotesTypeID.Def.BreakStar: return "BREAK_STAR";
+                case NotesTypeID.Def.ExStar: return "EX_STAR";
+                case NotesTypeID.Def.TouchTap: return "TOUCH_TAP";
+                case NotesTypeID.Def.TouchHold: return "TOUCH_HOLD";
+                case NotesTypeID.Def.ExBreakTap: return "EX_BREAK_TAP";
+                case NotesTypeID.Def.BreakHold: return "BREAK_HOLD";
+                case NotesTypeID.Def.ExBreakHold: return "EX_BREAK_HOLD";
+                case NotesTypeID.Def.Slide: return "SLIDE";
+                case NotesTypeID.Def.BreakSlide: return "BREAK_SLIDE";
+                case NotesTypeID.Def.ExSlide: return "EX_SLIDE";
                 case NotesTypeID.Def.ExBreakSlide: return "EX_BREAK_SLIDE";
-                case NotesTypeID.Def.ExBreakStar:  return "EX_BREAK_STAR";
+                case NotesTypeID.Def.ExBreakStar: return "EX_BREAK_STAR";
                 case NotesTypeID.Def.ConnectSlide: return "CONNECT_SLIDE";
                 default: return type.ToString();
             }
@@ -246,21 +256,21 @@ namespace AquaMai.Mods.GameSystem
             // FastGood / LateGood / FastMiss / LateMiss
             switch (timing)
             {
-                case NoteJudge.ETiming.Critical:       return "CRITICAL";
+                case NoteJudge.ETiming.Critical: return "CRITICAL";
                 case NoteJudge.ETiming.FastPerfect:
                 case NoteJudge.ETiming.FastPerfect2nd: return "FAST_PERFECT";
                 case NoteJudge.ETiming.LatePerfect:
                 case NoteJudge.ETiming.LatePerfect2nd: return "LATE_PERFECT";
                 case NoteJudge.ETiming.FastGreat:
                 case NoteJudge.ETiming.FastGreat2nd:
-                case NoteJudge.ETiming.FastGreat3rd:   return "FAST_GREAT";
+                case NoteJudge.ETiming.FastGreat3rd: return "FAST_GREAT";
                 case NoteJudge.ETiming.LateGreat:
                 case NoteJudge.ETiming.LateGreat2nd:
-                case NoteJudge.ETiming.LateGreat3rd:   return "LATE_GREAT";
-                case NoteJudge.ETiming.FastGood:       return "FAST_GOOD";
-                case NoteJudge.ETiming.LateGood:       return "LATE_GOOD";
-                case NoteJudge.ETiming.TooFast:        return "FAST_MISS";
-                case NoteJudge.ETiming.TooLate:        return "LATE_MISS";
+                case NoteJudge.ETiming.LateGreat3rd: return "LATE_GREAT";
+                case NoteJudge.ETiming.FastGood: return "FAST_GOOD";
+                case NoteJudge.ETiming.LateGood: return "LATE_GOOD";
+                case NoteJudge.ETiming.TooFast: return "FAST_MISS";
+                case NoteJudge.ETiming.TooLate: return "LATE_MISS";
                 default: return timing.ToString();
             }
         }

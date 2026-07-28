@@ -232,10 +232,15 @@ namespace AquaMai.Mods.GameSystem
         public class ButtonDetector
         {
             private bool is_pressed = false;
-            private int diff_deriv_down_count = -1;
-            private int up = 0;
-            private bool lock_releasing = false;
-            private bool edge_holding = false;
+
+            // A区 累积-导数双鉴算法状态变量
+            private int a_max_diff = 0;
+            private readonly Queue<int> a_ring = new Queue<int>();
+            private int a_ring_sum = 0;
+            private bool a_pending = false;
+            private int a_confirm_cnt = 0;
+            private bool a_observing = false;
+            private int a_observe_cnt = 0;
 
             private int[] history_16 = new int[16];
             private int history_idx = 0;
@@ -244,10 +249,13 @@ namespace AquaMai.Mods.GameSystem
             public void Reset()
             {
                 is_pressed = false;
-                diff_deriv_down_count = -1;
-                up = 0;
-                lock_releasing = false;
-                edge_holding = false;
+                a_max_diff = 0;
+                a_ring.Clear();
+                a_ring_sum = 0;
+                a_pending = false;
+                a_confirm_cnt = 0;
+                a_observing = false;
+                a_observe_cnt = 0;
                 Array.Clear(history_16, 0, 16);
                 history_idx = 0;
                 history_filled = false;
@@ -280,98 +288,126 @@ namespace AquaMai.Mods.GameSystem
 
                 bool on = false;
 
-                if (block == 'A') // === 组 0 ===
+                if (block == 'A')
                 {
-                    on = is_pressed;
+                    // ==========================================
+                    // A区：累积-导数双鉴算法
+                    // 针对大面积自电容区块，利用累积量与当前diff的关系
+                    // 结合一阶导数，辨别真实边缘触摸和悬空晃动
+                    // ==========================================
 
-                    int customDiff = override_A[physicalChannel];
-                    int on_default_diff = (customDiff != -1) ? customDiff : TenoDXIO.TriggerSensitivity;
+                    // 大信号直通：diff >= TriggerSensitivity 直接触发
+                    int largeDiffThresh = override_A[physicalChannel] != -1 ? override_A[physicalChannel] : TenoDXIO.TriggerSensitivity;
 
-                    bool is_fast_edge_strike = (diff_deriv >= TenoDXIO.EdgeTriggerDeriv) && (diff >= TenoDXIO.EdgeTriggerMinDiff);
-
-                    if (is_fast_edge_strike)
+                    if (diff >= largeDiffThresh)
                     {
-                        edge_holding = true;
+                        on = true;
+                        a_max_diff = Math.Max(a_max_diff, diff);
+                        a_observing = false;
                     }
-                    else if (diff < TenoDXIO.EdgeTriggerMinDiff - 50 || !is_pressed)
+                    else if (is_pressed)
                     {
-                        edge_holding = false;
-                    }
+                        // --- 保持阶段：动态峰值跟踪释放 ---
+                        if (diff > a_max_diff)
+                            a_max_diff = diff;
 
-                    if (diff > on_default_diff + 400 || diff < on_default_diff - 400) up = 0;
+                        int releaseThresh = Math.Max(TenoDXIO.ReleaseFloor, (int)(a_max_diff * TenoDXIO.ReleaseRatio));
 
-                    int on_diff = on_default_diff;
-
-                    int last_diff = GetHistory(0) - setup_raw;
-                    if (last_diff < on_default_diff && diff >= on_default_diff) up = 1;
-                    else if (last_diff >= on_default_diff && diff < on_default_diff) up = -1;
-
-                    switch (up)
-                    {
-                        case 0: on_diff = on_default_diff; break;
-                        case 1: on_diff = TenoDXIO.HoldThreshold; break;
-                        case -1: on_diff = 800; break;
-                    }
-
-                    if (edge_holding)
-                    {
-                        on_diff = Math.Min(on_diff, TenoDXIO.EdgeTriggerMinDiff);
-                    }
-
-                    int absolute_safe_diff = TenoDXIO.QuickReleaseLine;
-
-                    if (diff < 200) lock_releasing = false;
-
-                    if ((lock_releasing && diff_deriv > 150 && diff > on_diff) || diff > on_diff * 1.5 || is_fast_edge_strike)
-                    {
-                        lock_releasing = false;
-                    }
-
-                    if ((diff_deriv > 150 && diff > on_diff) || diff > on_diff * 1.5 || is_fast_edge_strike)
-                    {
-                        lock_releasing = false;
-                        diff_deriv_down_count = 0;
-                    }
-
-                    if (diff > on_diff || is_fast_edge_strike)
-                    {
-                        if (diff_deriv_down_count > 0) diff_deriv_down_count--;
-                        else if (lock_releasing) { }
+                        if (diff < releaseThresh || diff_deriv < TenoDXIO.SharpReleaseDeriv)
+                        {
+                            on = false;
+                            a_max_diff = 0;
+                            a_pending = false;
+                            a_observing = false;
+                        }
                         else
                         {
-                            if (!is_pressed && diff_deriv < TenoDXIO.HoverSpeedMax && diff < TenoDXIO.HoverDiffMax && !is_fast_edge_strike) { }
-                            else on = true;
+                            on = true;
+                        }
+                    }
+                    else if (a_pending)
+                    {
+                        // --- 确认阶段：含崩溃观察子阶段 ---
+                        a_confirm_cnt++;
+                        if (diff > a_max_diff)
+                            a_max_diff = diff;
+
+                        if (a_observing)
+                        {
+                            // 崩溃观察中 (优先级高于超时)
+                            a_observe_cnt++;
+                            if (diff_deriv < TenoDXIO.CrashDerivThreshold && diff < TenoDXIO.CrashDiffThreshold)
+                            {
+                                // 检测到导数崩溃：悬空误触，取消
+                                a_pending = false;
+                                a_observing = false;
+                                a_max_diff = 0;
+                                a_ring.Clear();
+                                a_ring_sum = 0;
+                                on = false;
+                            }
+                            else if (a_observe_cnt >= TenoDXIO.CrashWindow)
+                            {
+                                // 观察期满无崩溃：确认成功
+                                on = true;
+                                a_pending = false;
+                                a_observing = false;
+                            }
+                            else
+                            {
+                                on = false;
+                            }
+                        }
+                        else if (diff > TenoDXIO.ConfirmDiff)
+                        {
+                            // diff突破确认阈值，进入崩溃观察子阶段
+                            a_observing = true;
+                            a_observe_cnt = 0;
+                            on = false;
+                        }
+                        else if (a_confirm_cnt >= TenoDXIO.ConfirmFrames)
+                        {
+                            // 确认超时 (仅在未进入观察期时生效)
+                            a_pending = false;
+                            a_observing = false;
+                            a_max_diff = 0;
+                            a_ring.Clear();
+                            a_ring_sum = 0;
+                            on = false;
+                        }
+                        else
+                        {
+                            on = false;
                         }
                     }
                     else
                     {
-                        if (diff_deriv_down_count > 0) diff_deriv_down_count--;
-                        if (is_pressed && diff > 200) lock_releasing = true;
-                        on = false;
-                    }
+                        // --- 检测阶段：维护累积窗口并判断触发条件 ---
+                        a_ring.Enqueue(diff);
+                        a_ring_sum += diff;
+                        if (a_ring.Count > TenoDXIO.WindowSize)
+                            a_ring_sum -= a_ring.Dequeue();
 
-                    int deriv_down = TenoDXIO.FastLiftSpeed;
-                    int last3_diff = GetHistory(2) - setup_raw;
-
-                    if (last3_diff > 2700) deriv_down = -400;
-
-                    if (diff_deriv < deriv_down || diff_deriv_2 < deriv_down * 1.5 || diff_deriv_3 < deriv_down * 2)
-                    {
-                        if (diff_deriv < -800 || diff_deriv_2 < -1200 || diff_deriv_3 < -1500)
+                        int n = a_ring.Count;
+                        if (n > 0)
                         {
-                            if (diff < 1000)
+                            float cum_avg = (float)a_ring_sum / n;
+                            if (cum_avg > 0.1f)
                             {
-                                on = false;
-                                diff_deriv_down_count = 3;
-                                if (diff > 500) lock_releasing = true;
+                                float spike_ratio = diff / cum_avg;
+
+                                if (spike_ratio > TenoDXIO.TriggerRatio
+                                    && diff_deriv > TenoDXIO.TriggerDeriv
+                                    && diff > TenoDXIO.TriggerDiffMin)
+                                {
+                                    a_pending = true;
+                                    a_confirm_cnt = 0;
+                                    a_observing = false;
+                                    a_max_diff = diff;
+                                }
                             }
                         }
-                        else if (diff < absolute_safe_diff)
-                        {
-                            on = false;
-                            diff_deriv_down_count = 3;
-                            if (diff > 200) lock_releasing = true;
-                        }
+                        on = false;
                     }
                 }
                 else if (block == 'C') // === 组 1 ===
