@@ -143,8 +143,8 @@ namespace AquaMai.Mods.GameSystem
         // ================= A区 累积-导数双鉴算法参数 =================
         [ConfigEntry("A区 - 大信号直通阈值", "diff >= 此值时进入大信号通道。默认 700")]
         public static int TriggerSensitivity = 700;
-        [ConfigEntry("A区 - 大信号门控帧数", "设为1可在diff首次跨过700时延迟1帧确认，防止信号爬升阶段的提前判定。默认 0(关闭)")]
-        public static int LargeSignalGate = 0;
+        [ConfigEntry("A区 - 大信号门控帧数", "设为1可在diff首次跨过700时延迟1帧确认，防止提前判定。默认 1(推荐)")]
+        public static int LargeSignalGate = 1;
         [ConfigEntry("A区 - 累积窗口大小", "滑动窗口帧数。默认 8")]
         public static int WindowSize = 8;
         [ConfigEntry("A区 - 触发比例阈值", "spike_ratio = diff / cum_avg > 此值。默认 1.8")]
@@ -160,7 +160,7 @@ namespace AquaMai.Mods.GameSystem
         [ConfigEntry("A区 - 释放硬下限", "释放阈值不会低于此值。默认 35")]
         public static int ReleaseFloor = 35;
         [ConfigEntry("A区 - 动态释放比例", "释放阈值 = max(floor, peak * ratio)。默认 0.25")]
-        public static float ReleaseRatio = 0.25f;
+        public static float ReleaseRatio = 0.35f;
         [ConfigEntry("A区 - 快速释放导数", "deriv < 此值时立即释放。默认 -40")]
         public static int SharpReleaseDeriv = -40;
         [ConfigEntry("A区 - 崩溃观察窗口", "崩溃观察帧数。默认 7")]

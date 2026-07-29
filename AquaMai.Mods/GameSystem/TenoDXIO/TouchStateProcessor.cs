@@ -343,6 +343,8 @@ namespace AquaMai.Mods.GameSystem
                         {
                             on = false;
                             a_max_diff = 0;
+                            a_ring.Clear();
+                            a_ring_sum = 0;
                             a_pending = false;
                             a_observing = false;
                         }
