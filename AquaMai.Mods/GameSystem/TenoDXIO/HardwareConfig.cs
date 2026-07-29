@@ -59,8 +59,8 @@ namespace AquaMai.Mods.GameSystem
         }
 
         public static string[] PhysicalToLogicalMap = new string[34] {
-            "A5", "E5", "D5", "B4", "A4", "E4", "D4", "B3", "A3", "C1", "E3", "D3", "B2", "A2", "E2", "D2", "B1",
-            "A1", "E1", "D1", "B8", "A8", "E8", "D8", "B7", "A7", "C2", "E7", "D7", "B6", "A6", "E6", "D6", "B5"
+            "E4", "D4", "B3", "A3", "C1", "E3", "D3", "B2", "A2", "E2", "D2", "B1", "A1", "E1", "D1", "B8", "A8",
+            "E8", "D8", "B7", "A7", "C2", "E7", "D7", "B6", "A6", "E6", "D6", "B5", "A5", "E5", "D5", "B4", "A4"
         };
 
         public static ScanParams GetParams(char block)
