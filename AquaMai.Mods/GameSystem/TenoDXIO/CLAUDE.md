@@ -1,0 +1,3 @@
+- 你需要将你的工作记录写入'claude.log.md'
+- 完成代码修改之后执行'D:\Files\CLionProjects\AquaMai\build.ps1'进行编译，检查你修改过的文件是否有问题，不需要管其他文件的警告
+- 修改的代码不能破坏原始逻辑
