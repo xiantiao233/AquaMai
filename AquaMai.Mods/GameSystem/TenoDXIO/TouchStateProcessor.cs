@@ -163,6 +163,29 @@ namespace AquaMai.Mods.GameSystem
             for (int i = 0; i < 34; i++) detectors[i]?.Reset();
         }
 
+        // 单通道独立更新 (校准完成后使用)
+        // 允许只更新一个通道而不影响其他通道, 避免全量同步导致重复帧
+        public static void ProcessChannel(int physIdx, ushort rawValue)
+        {
+            if (!startupRawReady) return;
+            if (physIdx < 0 || physIdx >= 34) return;
+
+            currentRawValues[physIdx] = rawValue;
+            bool isPressed = detectors[physIdx].ProcessFrame(physIdx, rawValue, setupRaw[physIdx]);
+            currentTouchState[physIdx] = isPressed;
+
+            ulong bit = logicalToMaskMap[physIdx];
+            lock (dataLock)
+            {
+                if (isPressed)
+                    currentTouchMask |= bit;
+                else
+                    currentTouchMask &= ~bit;
+
+                latchedTouchMask |= currentTouchMask;
+            }
+        }
+
         public static void ProcessFrame(ushort[] physicalChannels)
         {
             if (!startupRawReady)

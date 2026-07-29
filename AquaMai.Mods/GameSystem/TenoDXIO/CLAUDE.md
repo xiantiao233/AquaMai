@@ -3,3 +3,4 @@
 - 修改的代码不能破坏原始逻辑
 - 'h503-migration'文件夹是对项目迁移向STM32H503迁移前做的准备
 - 目录没有说明统一为工作目录
+- stm32项目的touch指的是'D:\Files\CLionProjects\mystm32-teno\TenoDXController-H503\Core\Src\touch'

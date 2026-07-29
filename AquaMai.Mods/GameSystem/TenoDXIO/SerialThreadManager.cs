@@ -25,6 +25,18 @@ namespace AquaMai.Mods.GameSystem
         // 新增：舍弃前100帧不稳定数据，解决 IIR 冷启动问题
         private static int warmupFrames = 100;
 
+        // ================= PSoC 数据变化检测 =================
+        // 缓存每个 PSoC 的 34 字节原始载荷 (17ch × 2bytes), 用于检测数据是否变化
+        private static readonly byte[] lastPSoC0Block = new byte[34];
+        private static readonly byte[] lastPSoC1Block = new byte[34];
+
+        private static bool BlockEquals(byte[] cache, int cacheOff, byte[] src, int srcOff, int len)
+        {
+            for (int i = 0; i < len; i++)
+                if (cache[cacheOff + i] != src[srcOff + i]) return false;
+            return true;
+        }
+
         // 配置下发防抖时间戳
         private static DateTime lastConfigSendTime = DateTime.MinValue;
 
@@ -90,6 +102,35 @@ namespace AquaMai.Mods.GameSystem
             }
         }
 
+        // 检查 PSoC 的 34 字节数据块是否有变化, 有变化则逐通道送入判定器并更新缓存
+        private static void ProcessPSoCBlockIfChanged(int psoCIndex, byte[] frameBuf, int byteOff, byte[] cache)
+        {
+            if (BlockEquals(cache, 0, frameBuf, byteOff, 34)) return; // 无变化, 跳过
+
+            int baseChannel = psoCIndex * 17;
+            for (int i = 0; i < 17; i++)
+            {
+                int ch = baseChannel + i;
+                ushort raw = (ushort)(frameBuf[byteOff + i * 2] | (frameBuf[byteOff + i * 2 + 1] << 8));
+
+                if (TenoDXIO.IIRFilterFactor > 1)
+                {
+                    if (isFirstFrame) filterHistory[ch] = raw;
+                    else filterHistory[ch] += (raw - filterHistory[ch]) / (float)TenoDXIO.IIRFilterFactor;
+                    channelsCache[ch] = (ushort)Math.Round(filterHistory[ch]);
+                }
+                else
+                {
+                    channelsCache[ch] = raw;
+                }
+
+                TouchStateProcessor.ProcessChannel(ch, channelsCache[ch]);
+            }
+
+            // 有变化才更新缓存
+            Array.Copy(frameBuf, byteOff, cache, 0, 34);
+        }
+
         private static void SerialReaderThread()
         {
             while (isRunning)
@@ -109,6 +150,8 @@ namespace AquaMai.Mods.GameSystem
                         isFirstFrame = true;
                         warmupFrames = 100; // 重新连接时，再次预热 100 帧
                         bufferLength = 0;   // 清空脏数据缓冲区
+                        Array.Clear(lastPSoC0Block, 0, 34);
+                        Array.Clear(lastPSoC1Block, 0, 34);
 
                         TouchStateProcessor.ResetCalibration();
                     }
@@ -152,27 +195,15 @@ namespace AquaMai.Mods.GameSystem
                                     }
                                     else
                                     {
-                                        for (int i = 0; i < 34; i++)
-                                        {
-                                            ushort raw = (ushort)(streamBuffer[processIndex + 1 + i * 2] | (streamBuffer[processIndex + 2 + i * 2] << 8));
-
-                                            if (TenoDXIO.IIRFilterFactor > 1)
-                                            {
-                                                if (isFirstFrame) filterHistory[i] = raw;
-                                                else filterHistory[i] += (raw - filterHistory[i]) / (float)TenoDXIO.IIRFilterFactor;
-
-                                                channelsCache[i] = (ushort)Math.Round(filterHistory[i]);
-                                            }
-                                            else
-                                            {
-                                                channelsCache[i] = raw;
-                                            }
-                                        }
+                                        // 分 PSoC 检测数据变化, 仅将变化的通道送入判定器
+                                        // 避免重复帧导致 diff_deriv=0 污染历史记录
+                                        int frameOff = processIndex;
+                                        // PSoC 0: 通道 0~16, 帧偏移 1~34
+                                        ProcessPSoCBlockIfChanged(0, streamBuffer, frameOff + 1, lastPSoC0Block);
+                                        // PSoC 1: 通道 17~33, 帧偏移 35~68
+                                        ProcessPSoCBlockIfChanged(1, streamBuffer, frameOff + 35, lastPSoC1Block);
 
                                         if (isFirstFrame && TenoDXIO.IIRFilterFactor > 1) isFirstFrame = false;
-
-                                        // 将复用的 channelsCache 传递进去
-                                        TouchStateProcessor.ProcessFrame(channelsCache);
                                     }
                                 }
                                 else if (status == 0x01)
