@@ -163,6 +163,8 @@ namespace AquaMai.Mods.GameSystem
             for (int i = 0; i < 34; i++) detectors[i]?.Reset();
         }
 
+        internal static bool IsStartupRawReady => startupRawReady;
+
         // 单通道独立更新 (校准完成后使用)
         // 允许只更新一个通道而不影响其他通道, 避免全量同步导致重复帧
         public static void ProcessChannel(int physIdx, ushort rawValue)

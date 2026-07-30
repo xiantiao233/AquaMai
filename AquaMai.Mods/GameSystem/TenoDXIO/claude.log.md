@@ -1,6 +1,22 @@
 # Claude 工作记录
 
-## 2026-07-29: 代码分析与分离重构
+## 2026-07-30: 修复 TenoData 读取的校准死锁
+
+### 问题
+串口线程在处理 `status == 0x00` 数据帧时，只调用 `ProcessPSoCBlockIfChanged` → `ProcessChannel`，但 `ProcessChannel` 第170行要求 `startupRawReady == true` 才会处理数据。而 `startupRawReady` 只由 `ProcessFrame` 设置，但 `ProcessFrame` 从未被调用。
+
+结果：校准永远无法完成，所有34通道触摸数据被静默丢弃。
+
+### 修复
+1. **TouchStateProcessor.cs**: 新增 `internal static bool IsStartupRawReady` 属性暴露校准状态
+2. **SerialThreadManager.cs**: 
+   - 新增 `ExtractAllChannels()` 方法 — 从原始帧提取全部34通道数据并应用 IIR 滤波，与 Python `run2/main.py` 的解码逻辑一致
+   - 预热后先提取全部通道 → 若未校准则调用 `ProcessFrame(channelsCache)` 完成校准 → 校准完成后切换到 PSoC 变化检测优化
+   - `ProcessPSoCBlockIfChanged` 简化为仅做判定处理（IIR 已由 `ExtractAllChannels` 完成）
+
+### 修改文件
+- `TouchStateProcessor.cs` — 添加 `IsStartupRawReady` 属性
+- `SerialThreadManager.cs` — 新增 `ExtractAllChannels`，重构核心数据流
 
 ### 背景
 用户需要将项目迁移到单片机（MCU），需要对现有代码进行合理分离，保留串口处理逻辑、判定逻辑和配置文件，为后续迁移做准备。

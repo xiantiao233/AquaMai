@@ -102,16 +102,13 @@ namespace AquaMai.Mods.GameSystem
             }
         }
 
-        // 检查 PSoC 的 34 字节数据块是否有变化, 有变化则逐通道送入判定器并更新缓存
-        private static void ProcessPSoCBlockIfChanged(int psoCIndex, byte[] frameBuf, int byteOff, byte[] cache)
+        // 从原始帧中提取全部 34 通道数据并应用 IIR 滤波, 填充 channelsCache
+        private static void ExtractAllChannels(int frameOff)
         {
-            if (BlockEquals(cache, 0, frameBuf, byteOff, 34)) return; // 无变化, 跳过
-
-            int baseChannel = psoCIndex * 17;
-            for (int i = 0; i < 17; i++)
+            for (int ch = 0; ch < 34; ch++)
             {
-                int ch = baseChannel + i;
-                ushort raw = (ushort)(frameBuf[byteOff + i * 2] | (frameBuf[byteOff + i * 2 + 1] << 8));
+                int byteOff = frameOff + 1 + ch * 2;
+                ushort raw = (ushort)(streamBuffer[byteOff] | (streamBuffer[byteOff + 1] << 8));
 
                 if (TenoDXIO.IIRFilterFactor > 1)
                 {
@@ -123,7 +120,19 @@ namespace AquaMai.Mods.GameSystem
                 {
                     channelsCache[ch] = raw;
                 }
+            }
+        }
 
+        // 检查 PSoC 的 34 字节数据块是否有变化, 有变化则逐通道送入判定器并更新缓存
+        // 注意: channelsCache 已由 ExtractAllChannels 预先填充, 此方法仅做判定处理
+        private static void ProcessPSoCBlockIfChanged(int psoCIndex, byte[] frameBuf, int byteOff, byte[] cache)
+        {
+            if (BlockEquals(cache, 0, frameBuf, byteOff, 34)) return; // 无变化, 跳过
+
+            int baseChannel = psoCIndex * 17;
+            for (int i = 0; i < 17; i++)
+            {
+                int ch = baseChannel + i;
                 TouchStateProcessor.ProcessChannel(ch, channelsCache[ch]);
             }
 
@@ -195,15 +204,25 @@ namespace AquaMai.Mods.GameSystem
                                     }
                                     else
                                     {
-                                        // 分 PSoC 检测数据变化, 仅将变化的通道送入判定器
-                                        // 避免重复帧导致 diff_deriv=0 污染历史记录
                                         int frameOff = processIndex;
-                                        // PSoC 0: 通道 0~16, 帧偏移 1~34
-                                        ProcessPSoCBlockIfChanged(0, streamBuffer, frameOff + 1, lastPSoC0Block);
-                                        // PSoC 1: 通道 17~33, 帧偏移 35~68
-                                        ProcessPSoCBlockIfChanged(1, streamBuffer, frameOff + 35, lastPSoC1Block);
+
+                                        // 提取全部 34 通道数据并应用 IIR 滤波
+                                        ExtractAllChannels(frameOff);
 
                                         if (isFirstFrame && TenoDXIO.IIRFilterFactor > 1) isFirstFrame = false;
+
+                                        if (!TouchStateProcessor.IsStartupRawReady)
+                                        {
+                                            // 校准阶段：调用 ProcessFrame 完成基线校准和全量处理
+                                            TouchStateProcessor.ProcessFrame(channelsCache);
+                                        }
+                                        else
+                                        {
+                                            // 运行阶段：分 PSoC 检测数据变化, 仅将变化的通道送入判定器
+                                            // 避免重复帧导致 diff_deriv=0 污染历史记录
+                                            ProcessPSoCBlockIfChanged(0, streamBuffer, frameOff + 1, lastPSoC0Block);
+                                            ProcessPSoCBlockIfChanged(1, streamBuffer, frameOff + 35, lastPSoC1Block);
+                                        }
                                     }
                                 }
                                 else if (status == 0x01)
