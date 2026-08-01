@@ -61,6 +61,8 @@ namespace AquaMai.Mods.GameSystem
         public static int TriggerSensitivity = 700;
         [ConfigEntry("A区 - 大信号门控帧数", "设为1可在diff首次跨过700时延迟1帧确认，防止提前判定。默认 1(推荐)")]
         public static int LargeSignalGate = 1;
+        [ConfigEntry("A区 - 大信号门控deriv上限", "大信号跨700时，若deriv超过此值则启用门控；已稳定信号(deriv≤此值)跳过门控直接触发。默认 300")]
+        public static int LargeGateDerivMax = 300;
         [ConfigEntry("A区 - 累积窗口大小", "滑动窗口帧数。默认 8")]
         public static int WindowSize = 8;
         [ConfigEntry("A区 - 触发比例阈值", "spike_ratio = diff / cum_avg > 此值。默认 1.8")]
@@ -85,6 +87,10 @@ namespace AquaMai.Mods.GameSystem
         public static int CrashDerivThreshold = -8;
         [ConfigEntry("A区 - 崩溃Diff阈值", "崩溃判定配合使用的 diff 上限。默认 280")]
         public static int CrashDiffThreshold = 280;
+        [ConfigEntry("A区 - 增长判定导数底线", "观察期内 deriv 需高于此值的帧数达标才确认，过滤站定不前的虚空信号。默认 3")]
+        public static int GrowthFloor = 3;
+        [ConfigEntry("A区 - 可信触摸阈值", "观察期内 a_max_diff 达到此值则豁免崩溃/增长检查，直接确认。用于快速扫过等场景。默认 350")]
+        public static int ConfidentDiffThreshold = 350;
 
         // ================= C区 判定参数 =================
         [ConfigEntry("C区 - Diff 触发线", "默认 25")]

@@ -15,6 +15,8 @@ namespace AquaMai.Mods.GameSystem
         private int a_confirm_cnt = 0;
         private bool a_observing = false;
         private int a_observe_cnt = 0;
+        private int a_obs_start_diff = 0; // diff when observation started (for growth check)
+        private int a_growth_frames = 0;  // count of obs frames with deriv > GrowthFloor
         private int a_large_gate = 0;    // large signal gate counter
 
         private int[] history_16 = new int[16];
@@ -31,6 +33,8 @@ namespace AquaMai.Mods.GameSystem
             a_confirm_cnt = 0;
             a_observing = false;
             a_observe_cnt = 0;
+            a_obs_start_diff = 0;
+            a_growth_frames = 0;
             a_large_gate = 0;
             Array.Clear(history_16, 0, 16);
             history_idx = 0;
@@ -73,11 +77,14 @@ namespace AquaMai.Mods.GameSystem
                 // ==========================================
 
                 // 大信号通道：diff >= TriggerSensitivity 进入门控确认
+                // v7: 仅在 deriv 仍处于快速爬升时启用门控，信号已稳定则跳过门控直接触发
                 int largeDiffThresh = TouchStateProcessor.Override_A[physicalChannel] != -1 ? TouchStateProcessor.Override_A[physicalChannel] : TenoDXIO.TriggerSensitivity;
 
                 if (diff >= largeDiffThresh)
                 {
-                    if (!is_pressed && a_large_gate < TenoDXIO.LargeSignalGate)
+                    bool needGate = TenoDXIO.LargeSignalGate > 0 && !is_pressed
+                                    && diff_deriv > TenoDXIO.LargeGateDerivMax;
+                    if (needGate && a_large_gate < TenoDXIO.LargeSignalGate)
                     {
                         a_large_gate++;
                         on = false;
@@ -90,9 +97,9 @@ namespace AquaMai.Mods.GameSystem
                         a_large_gate = 0;
                     }
                 }
-                else if (a_large_gate > 0 && diff > 200)
+                else if (a_large_gate > 0)
                 {
-                    // 门控到期，diff未崩溃则确认
+                    // 门控到期即确认 (v5: 移除diff>200二次验证 — 信号已证明自己跨过700)
                     a_large_gate++;
                     if (a_large_gate > TenoDXIO.LargeSignalGate)
                     {
@@ -137,10 +144,19 @@ namespace AquaMai.Mods.GameSystem
                     if (a_observing)
                     {
                         // 崩溃观察中 (优先级高于超时)
+                        // v4: 增长感知 — 不仅检查崩溃还要求信号持续上升
+                        // v5: 可信阈值 — 若信号已达 ConfidentDiffThreshold 则豁免检查
                         a_observe_cnt++;
-                        if (diff_deriv < TenoDXIO.CrashDerivThreshold && diff < TenoDXIO.CrashDiffThreshold)
+                        if (diff_deriv > TenoDXIO.GrowthFloor)
+                            a_growth_frames++;
+
+                        bool confident = a_max_diff >= TenoDXIO.ConfidentDiffThreshold;
+
+                        if (!confident
+                            && diff_deriv < TenoDXIO.CrashDerivThreshold
+                            && diff < TenoDXIO.CrashDiffThreshold)
                         {
-                            // 检测到导数崩溃：悬空误触，取消
+                            // 检测到导数崩溃且信号未达可信阈值：悬空误触，取消
                             a_pending = false;
                             a_observing = false;
                             a_max_diff = 0;
@@ -150,10 +166,25 @@ namespace AquaMai.Mods.GameSystem
                         }
                         else if (a_observe_cnt >= TenoDXIO.CrashWindow)
                         {
-                            // 观察期满无崩溃：确认成功
-                            on = true;
-                            a_pending = false;
-                            a_observing = false;
+                            // 观察期满：检查增长条件（或可信豁免）
+                            int minGrowthFrames = Math.Max(1, TenoDXIO.CrashWindow / 2 + 1);
+                            bool growthOk = diff > a_obs_start_diff && a_growth_frames >= minGrowthFrames;
+                            if (growthOk || confident)
+                            {
+                                on = true;
+                                a_pending = false;
+                                a_observing = false;
+                            }
+                            else
+                            {
+                                // 停滞/衰减且未达可信阈值 -> 虚空触发，取消
+                                a_pending = false;
+                                a_observing = false;
+                                a_max_diff = 0;
+                                a_ring.Clear();
+                                a_ring_sum = 0;
+                                on = false;
+                            }
                         }
                         else
                         {
@@ -165,6 +196,8 @@ namespace AquaMai.Mods.GameSystem
                         // diff突破确认阈值，进入崩溃观察子阶段
                         a_observing = true;
                         a_observe_cnt = 0;
+                        a_obs_start_diff = diff;
+                        a_growth_frames = 0;
                         on = false;
                     }
                     else if (a_confirm_cnt >= TenoDXIO.ConfirmFrames)
