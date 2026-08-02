@@ -56,41 +56,121 @@ namespace AquaMai.Mods.GameSystem
         [ConfigEntry("UI - 时钟描边宽度", "默认 3，设为 0 则关闭描边")]
         public static int ClockOutlineWidth = 3;
 
-        // ================= A区 累积-导数双鉴算法参数 =================
-        [ConfigEntry("A区 - 大信号直通阈值", "diff >= 此值时进入大信号通道。默认 700")]
-        public static int TriggerSensitivity = 700;
-        [ConfigEntry("A区 - 大信号门控帧数", "设为1可在diff首次跨过700时延迟1帧确认，防止提前判定。默认 1(推荐)")]
-        public static int LargeSignalGate = 1;
-        [ConfigEntry("A区 - 大信号门控deriv上限", "大信号跨700时，若deriv超过此值则启用门控；已稳定信号(deriv≤此值)跳过门控直接触发。默认 300")]
-        public static int LargeGateDerivMax = 300;
-        [ConfigEntry("A区 - 累积窗口大小", "滑动窗口帧数。默认 8")]
-        public static int WindowSize = 8;
-        [ConfigEntry("A区 - 触发比例阈值", "spike_ratio = diff / cum_avg > 此值。默认 1.8")]
-        public static float TriggerRatio = 1.8f;
-        [ConfigEntry("A区 - 触发导数阈值", "deriv > 此值。默认 28")]
-        public static int TriggerDeriv = 28;
-        [ConfigEntry("A区 - 触发最小Diff", "diff > 此值，过滤噪声。默认 55")]
-        public static int TriggerDiffMin = 55;
-        [ConfigEntry("A区 - 确认超时帧数", "pending 阶段超时帧数。默认 10")]
-        public static int ConfirmFrames = 10;
-        [ConfigEntry("A区 - 确认Diff阈值", "diff 突破此值进入崩溃观察。默认 200")]
-        public static int ConfirmDiff = 200;
-        [ConfigEntry("A区 - 释放硬下限", "释放阈值不会低于此值。默认 35")]
-        public static int ReleaseFloor = 35;
-        [ConfigEntry("A区 - 动态释放比例", "释放阈值 = max(floor, peak * ratio)。默认 0.25")]
-        public static float ReleaseRatio = 0.35f;
-        [ConfigEntry("A区 - 快速释放导数", "deriv < 此值时立即释放。默认 -40")]
-        public static int SharpReleaseDeriv = -40;
-        [ConfigEntry("A区 - 崩溃观察窗口", "崩溃观察帧数。默认 7")]
-        public static int CrashWindow = 7;
-        [ConfigEntry("A区 - 崩溃导数阈值", "观察期内 deriv 低于此值且 diff 低于CrashDiffThreshold则判定悬空取消。默认 -8")]
-        public static int CrashDerivThreshold = -8;
-        [ConfigEntry("A区 - 崩溃Diff阈值", "崩溃判定配合使用的 diff 上限。默认 280")]
-        public static int CrashDiffThreshold = 280;
-        [ConfigEntry("A区 - 增长判定导数底线", "观察期内 deriv 需高于此值的帧数达标才确认，过滤站定不前的虚空信号。默认 3")]
-        public static int GrowthFloor = 3;
-        [ConfigEntry("A区 - 可信触摸阈值", "观察期内 a_max_diff 达到此值则豁免崩溃/增长检查，直接确认。用于快速扫过等场景。默认 350")]
-        public static int ConfidentDiffThreshold = 350;
+        // ================= A区 大面积自电容状态机参数 =================
+
+        // -------------------- 普通按下 --------------------
+
+        [ConfigEntry(
+            "A区 - 边缘触摸阈值",
+            "普通单指边缘触摸的最低Diff。数值越低越灵敏。默认 320")]
+        public static int AEdgeOn = 320;
+
+        [ConfigEntry(
+            "A区 - 大面积触摸阈值",
+            "快速大面积按下时不会在边缘阈值处提前触发，而是达到此阈值后触发。默认 850")]
+        public static int ALargeOn = 850;
+
+        [ConfigEntry(
+            "A区 - 快速上升导数",
+            "超过此deriv时认为可能是大面积快速按下，暂不在边缘阈值处触发。默认 90")]
+        public static int AFastRiseDeriv = 90;
+
+        [ConfigEntry(
+            "A区 - 边缘最小上升导数",
+            "普通边缘触摸触发时所需的最小正向deriv，防止下降沿误触。默认 2")]
+        public static int AEdgeMinDeriv = 2;
+
+
+        // -------------------- 快速上升候选 --------------------
+
+        [ConfigEntry(
+            "A区 - 快速短点击峰值",
+            "快速上升未达到大面积阈值，但稳定或下降前达到此峰值时，作为边缘短点击触发。默认 390")]
+        public static int AShortTapPeak = 390;
+
+        [ConfigEntry(
+            "A区 - 快速候选稳定导数",
+            "快速候选的deriv下降到此值以下时，认为上升已经结束。默认 3")]
+        public static int APendingSettleDeriv = 3;
+
+        [ConfigEntry(
+            "A区 - 快速候选取消阈值",
+            "快速候选信号跌到此Diff以下时取消，防止候选状态卡住。默认 180")]
+        public static int AFastPendingCancel = 180;
+
+
+        // -------------------- 释放 --------------------
+
+        [ConfigEntry(
+            "A区 - 彻底释放阈值",
+            "信号回到动态基线附近并低于此值时立即释放。默认 105")]
+        public static int ACleanRelease = 105;
+
+        [ConfigEntry(
+            "A区 - 峰值释放比例",
+            "当前Diff低于本次峰值乘以此比例时，才允许通过下降手势释放。默认 0.52")]
+        public static float AReleasePeakRatio = 0.52f;
+
+        [ConfigEntry(
+            "A区 - 最小释放下降量",
+            "相对本次按下峰值至少下降这么多计数才允许释放。默认 180")]
+        public static int AReleaseMinDrop = 180;
+
+        [ConfigEntry(
+            "A区 - 最小释放下降比例",
+            "相对峰值至少下降此比例才允许释放。默认 0.25")]
+        public static float AReleaseDropRatio = 0.25f;
+
+        [ConfigEntry(
+            "A区 - 释放导数",
+            "deriv低于此值且同时满足峰值比例和下降量时释放。默认 -12")]
+        public static int AReleaseDeriv = -12;
+
+
+        // -------------------- 释放后连续重按 --------------------
+
+        [ConfigEntry(
+            "A区 - 快速重按上升量",
+            "释放后，相对下降谷底快速上升这么多计数即可重新触发。默认 120")]
+        public static int ARepressRise = 120;
+
+        [ConfigEntry(
+            "A区 - 快速重按导数",
+            "快速重按所需的最小正向deriv。默认 20")]
+        public static int ARepressDeriv = 20;
+
+        [ConfigEntry(
+            "A区 - 慢速重按上升量",
+            "连续操作较慢时，相对下降谷底上升这么多计数也可重新触发。默认 280")]
+        public static int ARepressSlowRise = 280;
+
+        [ConfigEntry(
+            "A区 - 重按最低信号",
+            "快速重按时，相对动态基线至少达到此Diff，防止释放回弹误触。默认 250")]
+        public static int ARepressSignalMin = 250;
+
+
+        // -------------------- 动态基线 --------------------
+
+        [ConfigEntry(
+            "A区 - 基线追踪范围",
+            "只有信号与动态基线的距离不超过此值时才允许追踪基线。默认 120")]
+        public static int ABaselineTrackRange = 120;
+
+        [ConfigEntry(
+            "A区 - 基线静置导数",
+            "只有deriv绝对值不超过此值时才允许追踪基线。默认 6")]
+        public static int ABaselineQuietDeriv = 6;
+
+        [ConfigEntry(
+            "A区 - 基线追踪系数",
+            "动态基线每次向当前Raw移动的比例。默认 0.02")]
+        public static float ABaselineAlpha = 0.02f;
+
+        [ConfigEntry(
+            "A区 - 基线最大步长",
+            "动态基线每次调用最多移动的计数，防止吸收真实触摸。默认 0.5")]
+        public static float ABaselineMaxStep = 0.5f;
 
         // ================= C区 判定参数 =================
         [ConfigEntry("C区 - Diff 触发线", "默认 25")]
@@ -104,13 +184,13 @@ namespace AquaMai.Mods.GameSystem
 
         // ================= B/D/E区 独立判定参数 =================
         [ConfigEntry("B区 - Diff 触发线", "默认 8")]
-        public static int BlockB_DiffThreshold = 8;
+        public static int BlockB_DiffThreshold = 20;
         [ConfigEntry("B区 - diff_deriv 突变抑制线", "默认 -15")]
-        public static int BlockB_DerivRelease = -15;
+        public static int BlockB_DerivRelease = -20;
         [ConfigEntry("D区 - Diff 触发线", "默认 3")]
-        public static int BlockD_DiffThreshold = 3;
+        public static int BlockD_DiffThreshold = 20;
         [ConfigEntry("D区 - diff_deriv 突变抑制线", "默认 -4")]
-        public static int BlockD_DerivRelease = -4;
+        public static int BlockD_DerivRelease = -18;
         [ConfigEntry("E区 - Diff 触发线", "默认 15")]
         public static int BlockE_DiffThreshold = 15;
         [ConfigEntry("E区 - diff_deriv 突变抑制线", "默认 -16")]
