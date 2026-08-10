@@ -1,0 +1,9 @@
+[33mcommit 5757e68997587f6884cbfbc632fe9d859cd63e8a[m[33m ([m[1;32mrecover-5757e68[m[33m)[m
+Author: xiantiao <my@xiantiao.fun>
+Date:   Sun Aug 2 20:02:11 2026 +0800
+
+    ke
+
+ AquaMai.Mods/GameSystem/TenoDXIO/ButtonDetector.cs | 574 [32m++++++++++++++[m[31m-------[m
+ AquaMai.Mods/GameSystem/TenoDXIO/TenoDXIOConfig.cs | 158 [32m++++[m[31m--[m
+ 2 files changed, 503 insertions(+), 229 deletions(-)
